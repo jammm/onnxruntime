@@ -20,7 +20,7 @@ limitations under the License.
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "layer_norm.cuh"
+#include "contrib_ops/cuda/bert/layer_norm.cuh"
 #include "embed_layer_norm_impl.h"
 #include <cuda_fp16.h>
 

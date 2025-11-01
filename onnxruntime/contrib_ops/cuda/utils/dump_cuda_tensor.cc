@@ -7,6 +7,10 @@
 #include "contrib_ops/cuda/utils/dump_cuda_tensor.h"
 #include "core/platform/env_var_utils.h"
 
+#ifdef __HIPCC__
+#include <hip/hip_bf16.h>
+#endif
+
 namespace onnxruntime {
 namespace contrib {
 namespace cuda {

@@ -24,6 +24,12 @@ limitations under the License.
 #include "core/providers/cuda/cuda_common.h"
 #include "contrib_ops/cuda/bert/attention_impl.h"
 
+#ifdef __HIPCC__
+#include <hip/hip_bf16.h>
+#define __nv_bfloat162 __hip_bfloat162
+#define nv_bfloat162 __hip_bfloat162
+#endif
+
 using namespace onnxruntime::cuda;
 
 namespace onnxruntime {

@@ -136,7 +136,7 @@ struct NumericLimits<half> {
   }
 
   __inline__ __host__ __device__ static half Max() {
-#ifdef CUDART_MAX_NORMAL_FP16  // defined in cuda 12.3 or later
+#if defined(CUDART_MAX_NORMAL_FP16) && !defined(_MSC_VER)  // defined in cuda 12.3 or later
     return CUDART_MAX_NORMAL_FP16;
 #else
     return 65504.0f;

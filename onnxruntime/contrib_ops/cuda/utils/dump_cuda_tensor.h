@@ -7,6 +7,10 @@
 #include "core/framework/ort_value.h"
 #include "contrib_ops/cpu/utils/console_dumper.h"
 
+#ifdef __HIPCC__
+#include <hip/hip_bf16.h>
+#endif
+
 namespace onnxruntime {
 namespace contrib {
 namespace cuda {

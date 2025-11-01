@@ -167,29 +167,26 @@ struct Strides {
 
   template <typename T = LongLong4>
   T ForBNSHCoord() const {
-    using E = typename T::value_type;
-    return T{static_cast<E>(strides_for_bnsh_coord.x),
-             static_cast<E>(strides_for_bnsh_coord.y),
-             static_cast<E>(strides_for_bnsh_coord.z),
-             static_cast<E>(strides_for_bnsh_coord.w)};
+    return T{static_cast<int64_t>(strides_for_bnsh_coord.x),
+             static_cast<int64_t>(strides_for_bnsh_coord.y),
+             static_cast<int64_t>(strides_for_bnsh_coord.z),
+             static_cast<int64_t>(strides_for_bnsh_coord.w)};
   }
 
   template <typename T = LongLong4>
   T ForBSNHCoord() const {
-    using E = typename T::value_type;
-    return T{static_cast<E>(strides_for_bnsh_coord.x),
-             static_cast<E>(strides_for_bnsh_coord.z),
-             static_cast<E>(strides_for_bnsh_coord.y),
-             static_cast<E>(strides_for_bnsh_coord.w)};
+    return T{static_cast<int64_t>(strides_for_bnsh_coord.x),
+             static_cast<int64_t>(strides_for_bnsh_coord.z),
+             static_cast<int64_t>(strides_for_bnsh_coord.y),
+             static_cast<int64_t>(strides_for_bnsh_coord.w)};
   }
 
   template <typename T = LongLong4>
   T ForBNHSCoord() const {
-    using E = typename T::value_type;
-    return T{static_cast<E>(strides_for_bnsh_coord.x),
-             static_cast<E>(strides_for_bnsh_coord.y),
-             static_cast<E>(strides_for_bnsh_coord.w),
-             static_cast<E>(strides_for_bnsh_coord.z)};
+    return T{static_cast<int64_t>(strides_for_bnsh_coord.x),
+             static_cast<int64_t>(strides_for_bnsh_coord.y),
+             static_cast<int64_t>(strides_for_bnsh_coord.w),
+             static_cast<int64_t>(strides_for_bnsh_coord.z)};
   }
 
   int64_t OffsetAt(int b, int n, int s, int h) const {

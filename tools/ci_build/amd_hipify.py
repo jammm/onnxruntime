@@ -11,7 +11,12 @@ def hipify(hipify_perl_path, src_file_path, dst_file_path):
     if not os.path.exists(dir_name):
         os.makedirs(dir_name, exist_ok=True)
     # Run hipify-perl first, capture output
-    s = subprocess.run([hipify_perl_path, src_file_path], stdout=subprocess.PIPE, text=True, check=False).stdout
+    # On Windows, we need to explicitly invoke perl to run the hipify-perl script
+    if os.name == 'nt':  # Windows
+        cmd = ['perl', hipify_perl_path, src_file_path]
+    else:
+        cmd = [hipify_perl_path, src_file_path]
+    s = subprocess.run(cmd, stdout=subprocess.PIPE, text=True, check=False).stdout
 
     # Additional exact-match replacements.
     # Order matters for all of the following replacements, reglardless of appearing in logical sections.

@@ -10,7 +10,12 @@
 */
 // NV_TODO: optimize speed -- pass things needed in, optimize kernel speed, add half2
 // NV_TODO: investigate cub support for half
+#ifndef __HIPCC__
 #include "core/providers/cuda/curand_wrapper.h"
+#else
+#include <hiprand/hiprand.h>
+#include <hiprand/hiprand_kernel.h>
+#endif
 #include "core/providers/cuda/cu_inc/common.cuh"
 
 #define TRANS_TILE_DIM 32

@@ -1,4 +1,3 @@
-#include "hip/hip_runtime.h"
 /*
  The implementation of this file is based on skipLayerNorm plugin in TensorRT demo:
  https://github.com/NVIDIA/TensorRT/tree/release/5.1/demo/BERT/
@@ -28,59 +27,250 @@ limitations under the License.
 // Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 // Licensed under the MIT License.
 
+#include "contrib_ops/rocm/bert/layer_norm.cuh"
 #include "contrib_ops/rocm/bert/skip_layer_norm_impl.h"
-
 #include <hip/hip_fp16.h>
-
-#include "contrib_ops/rocm/bert/skip_layer_norm_impl_kernel.h"
-#include "contrib_ops/rocm/bert/skip_layer_norm_tunable_op.h"
+#include <hip/hip_bf16.h>
 
 namespace onnxruntime {
 namespace contrib {
 namespace rocm {
 
-template <typename T, typename U, typename V, bool Simplified>
-Status LaunchSkipLayerNormKernel(
-    RocmTuningContext* tuning_ctx, Stream* stream, V* output, T* skip_input_bias_add_output, const T* input,
-    const T* skip, const V* gamma, const V* beta, const T* bias, float epsilon, int ld, int element_count) {
-  // this must be true because element_count is the total size of the tensor
-  assert(element_count % ld == 0);
+namespace {
+template <typename T>
+T maybe2half(float x);
 
-  SkipLayerNormParams<T, V> params(tuning_ctx, stream, output, skip_input_bias_add_output, input, skip,
-                                   gamma, beta, bias, epsilon, ld, element_count);
-
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    static SkipLayerNormTunableOp<T, U, V, Simplified> op;
-    return op(&params);
-  }
-
-  return SkipLayerNormStaticSelection<T, U, V, Simplified>(&params);
+template <>
+float maybe2half(float x) {
+  return x;
 }
 
-template Status LaunchSkipLayerNormKernel<float, float, float, true>(
-    RocmTuningContext* tuning_ctx, Stream* stream, float* output, float* skip_input_bias_add_output, const float* input,
-    const float* skip, const float* gamma, const float* beta,
-    const float* bias, float epsilon, int ld,
-    int element_count);
+template <>
+half maybe2half(float x) {
+  return __float2half_rn(x);
+}
 
-template Status LaunchSkipLayerNormKernel<half, float, half, true>(
-    RocmTuningContext* tuning_ctx, Stream* stream, half* output, half* skip_input_bias_add_output, const half* input,
-    const half* skip, const half* gamma, const half* beta,
-    const half* bias, float epsilon, int ld,
-    int element_count);
+template <>
+__hip_bfloat16 maybe2half(float x) {
+  return __float2bfloat16(x);
+}
 
-template Status LaunchSkipLayerNormKernel<float, float, float, false>(
-    RocmTuningContext* tuning_ctx, Stream* stream, float* output, float* skip_input_bias_add_output, const float* input,
-    const float* skip, const float* gamma, const float* beta,
-    const float* bias, float epsilon, int ld,
-    int element_count);
+// Using only power of 2 numbers will lead to waste of compute for same size such as 768, which is a very common case
+// in BERT. Ideally we can step by wrap_size * num_unroll, but listing too many steps will cause long compile time.
+constexpr int kSizes[] = {128, 320, 384, 640, 768, 1024, 1280, 2048, 4096, 5120, 8192};
+constexpr size_t kNumOfSizes = sizeof(kSizes) / sizeof(kSizes[0]);
+constexpr int kMaxSize = kSizes[kNumOfSizes - 1];
+constexpr int kMinBlockSize = 32;
+constexpr int kMaxBlockSize = 1024;
 
-template Status LaunchSkipLayerNormKernel<half, float, half, false>(
-    RocmTuningContext* tuning_ctx, Stream* stream, half* output, half* skip_input_bias_add_output, const half* input,
-    const half* skip, const half* gamma, const half* beta,
-    const half* bias, float epsilon, int ld,
-    int element_count);
+int NextSize(int x) {
+  for (size_t i = 0; i < kNumOfSizes; ++i) {
+    if (x <= kSizes[i]) {
+      return kSizes[i];
+    }
+  }
+  return kMaxSize + 1;
+}
 
+bool CanVectorized(void* output, void* sum_output, const void* input, const void* skip, const void* bias,
+                   const void* gamma, const void* beta, const int ld, const int next_size, int num_unroll, int element_size) {
+  int alignment = element_size * num_unroll;
+  return ld % num_unroll == 0 &&
+         reinterpret_cast<uint64_t>(output) % alignment == 0 &&
+         reinterpret_cast<uint64_t>(sum_output) % alignment == 0 &&
+         reinterpret_cast<uint64_t>(input) % alignment == 0 &&
+         reinterpret_cast<uint64_t>(skip) % alignment == 0 &&
+         reinterpret_cast<uint64_t>(bias) % alignment == 0 &&
+         reinterpret_cast<uint64_t>(gamma) % alignment == 0 &&
+         reinterpret_cast<uint64_t>(beta) % alignment == 0 &&
+         next_size / num_unroll >= kMinBlockSize &&
+         next_size / num_unroll <= kMaxBlockSize;
+}
+}  // namespace
+
+template <typename T, unsigned TPB, bool Simplified>
+__global__ void SkipLayerNormKernel(
+    T* output, T* sum_output, const T* input, const T* skip, const T* bias, const T* gamma, const T* beta, T epsilon,
+    const int ld, int skip_size) {
+  const T reverse_ld = T(1.f / ld);
+  const int offset = blockIdx.x * ld;
+  const bool has_bias = (bias != nullptr);
+
+  // Reduce sum of x and x^2, and the results are divided by ld.
+  KeyValuePairSum pair_sum;
+  hipcub::KeyValuePair<T, T> thread_data(T(0.f), T(0.f));
+
+  for (int i = threadIdx.x; i < ld; i += TPB) {
+    const int idx = offset + i;
+
+    T val = input[idx];
+    if (has_bias) {
+      val += bias[i];
+    }
+    val += skip[idx % skip_size];
+
+    const T rldval = reverse_ld * val;
+    thread_data = pair_sum(thread_data, hipcub::KeyValuePair<T, T>(rldval, rldval * val));
+
+    if (sum_output != nullptr) {
+      sum_output[idx] = val;
+    }
+
+    output[idx] = val;
+  }
+
+  if (Simplified) {
+    SimplifiedLayerNorm<T, TPB>(thread_data.value, ld, offset, gamma, epsilon, output);
+    return;
+  }
+  LayerNorm<T, TPB>(thread_data, ld, offset, beta, gamma, epsilon, output);
+}
+
+// Vectorized kernel
+template <typename T, unsigned TPB, int ILP, bool Simplified>
+__global__ void SkipLayerNormKernelSmall(
+    T* output, T* sum_output, const T* input, const T* skip, const T* bias, const T* gamma, const T* beta, T epsilon,
+    int ld, int skip_size) {
+  const T rld = T(1.f / ld);
+  const int idx = blockIdx.x * ld + threadIdx.x * ILP;
+
+  using VecT = aligned_vector<T, ILP>;
+  T sum_v[ILP];
+
+  hipcub::KeyValuePair<T, T> thread_data(T(0.f), T(0.f));
+
+  if (ILP * threadIdx.x < ld) {  // load data under this guard to avoid reading out-of-bounds
+    T skip_v[ILP], bias_v[ILP];
+
+    // load input to sum_v
+    VecT* sum_val = reinterpret_cast<VecT*>(&sum_v);
+    *sum_val = *reinterpret_cast<const VecT*>(&input[idx]);
+
+    VecT* skip_val = reinterpret_cast<VecT*>(&skip_v);
+    *skip_val = *reinterpret_cast<const VecT*>(&skip[idx % skip_size]);
+
+    const bool has_bias = (bias != nullptr);
+    if (has_bias) {
+      VecT* bias_val = reinterpret_cast<VecT*>(&bias_v);
+      *bias_val = *reinterpret_cast<const VecT*>(&bias[threadIdx.x * ILP]);
+    }
+
+    T rldval_sum = T(0.f);
+    T rldvalsq_sum = T(0.f);
+    const bool has_sum_output = (sum_output != nullptr);
+
+#pragma unroll
+    for (int i = 0; i < ILP; i++) {
+      if (has_bias) {
+        sum_v[i] += bias_v[i];
+      }
+      sum_v[i] += skip_v[i];
+
+      const T rldval = rld * sum_v[i];
+      rldval_sum += rldval;
+      rldvalsq_sum += rldval * sum_v[i];
+    }
+
+    if (has_sum_output) {
+      *(reinterpret_cast<VecT*>(&sum_output[idx])) = *reinterpret_cast<VecT*>(&sum_v);
+    }
+
+    thread_data = hipcub::KeyValuePair<T, T>(rldval_sum, rldvalsq_sum);
+  }
+
+  if (Simplified) {
+    SimplifiedLayerNormSmall<T, TPB, ILP>(sum_v, thread_data.value, ld, idx, gamma, epsilon, output);
+    return;
+  }
+  LayerNormSmall<T, TPB, ILP>(sum_v, thread_data, ld, idx, beta, gamma, epsilon, output);
+}
+
+template <typename T, bool Simplified>
+void LaunchSkipLayerNormKernel(
+    hipStream_t stream, T* output, T* sum_output,
+    const T* input, const T* skip, const T* bias, const T* gamma, const T* beta, float epsilon,
+    int ld, int row_count, int skip_size) {
+  const int next_size = NextSize(ld);
+  const int grid_size = row_count;
+  bool can_unroll_vec4 = CanVectorized(output, sum_output, input,
+                                       skip, bias, gamma,
+                                       beta, ld, next_size,
+                                       4, sizeof(T));
+  bool can_unroll_vec8 = CanVectorized(output, sum_output, input,
+                                       skip, bias, gamma,
+                                       beta, ld, next_size,
+                                       8, sizeof(T));
+
+#define LAUNCH_SKIP_LAYER_NORM_KERNEL_SMALL(num_unroll)                                                  \
+  SkipLayerNormKernelSmall<T, block_size, num_unroll, Simplified><<<grid_size, block_size, 0, stream>>>( \
+      output, sum_output, input, skip, bias, gamma, beta, maybe2half<T>(epsilon), ld, skip_size)
+
+#define LAUNCH_SKIP_LAYER_NORM_KERNEL()                                                 \
+  SkipLayerNormKernel<T, block_size, Simplified><<<grid_size, block_size, 0, stream>>>( \
+      output, sum_output, input, skip, bias, gamma, beta, maybe2half<T>(epsilon), ld, skip_size)
+
+#define CASE_NEXT_SIZE(next_size_value)                                         \
+  case next_size_value: {                                                       \
+    static_assert(next_size_value >= kSizes[0] && next_size_value <= kMaxSize); \
+    if constexpr (next_size_value >= 320) {                                     \
+      if (can_unroll_vec8) {                                                    \
+        constexpr int block_size = next_size_value / 8;                         \
+        LAUNCH_SKIP_LAYER_NORM_KERNEL_SMALL(8);                                 \
+      } else {                                                                  \
+        constexpr int block_size = 256;                                         \
+        LAUNCH_SKIP_LAYER_NORM_KERNEL();                                        \
+      }                                                                         \
+    } else {                                                                    \
+      if (can_unroll_vec4) {                                                    \
+        constexpr int block_size = next_size_value / 4;                         \
+        LAUNCH_SKIP_LAYER_NORM_KERNEL_SMALL(4);                                 \
+      } else {                                                                  \
+        if (next_size_value <= kMaxBlockSize) {                                 \
+          constexpr int block_size = next_size_value;                           \
+          LAUNCH_SKIP_LAYER_NORM_KERNEL_SMALL(1);                               \
+        } else {                                                                \
+          constexpr int block_size = 256;                                       \
+          LAUNCH_SKIP_LAYER_NORM_KERNEL();                                      \
+        }                                                                       \
+      }                                                                         \
+    }                                                                           \
+  } break
+
+  switch (next_size) {
+    CASE_NEXT_SIZE(kSizes[0]);
+    CASE_NEXT_SIZE(kSizes[1]);
+    CASE_NEXT_SIZE(kSizes[2]);
+    CASE_NEXT_SIZE(kSizes[3]);
+    CASE_NEXT_SIZE(kSizes[4]);
+    CASE_NEXT_SIZE(kSizes[5]);
+    CASE_NEXT_SIZE(kSizes[6]);
+    CASE_NEXT_SIZE(kSizes[7]);
+    CASE_NEXT_SIZE(kSizes[8]);
+    CASE_NEXT_SIZE(kSizes[9]);
+    CASE_NEXT_SIZE(kSizes[10]);
+    default: {
+      constexpr int block_size = 256;
+      LAUNCH_SKIP_LAYER_NORM_KERNEL();
+      break;
+    }
+  }
+
+#undef CASE_NEXT_SIZE
+#undef LAUNCH_SKIP_LAYER_NORM_KERNEL
+#undef LAUNCH_SKIP_LAYER_NORM_KERNEL_SMALL
+}
+
+#define SKIPLAYERNORM_IMPL(T, Simplified)                                                                 \
+  template void LaunchSkipLayerNormKernel<T, Simplified>(hipStream_t stream, T * output, T * sum_output, \
+                                                         const T* input, const T* skip, const T* bias,    \
+                                                         const T* gamma, const T* beta, float epsilon,    \
+                                                         int ld, int row_count, int skip_size);
+SKIPLAYERNORM_IMPL(float, true);
+SKIPLAYERNORM_IMPL(float, false);
+SKIPLAYERNORM_IMPL(half, true);
+SKIPLAYERNORM_IMPL(half, false);
+SKIPLAYERNORM_IMPL(__hip_bfloat16, true);
+SKIPLAYERNORM_IMPL(__hip_bfloat16, false);
 }  // namespace rocm
 }  // namespace contrib
 }  // namespace onnxruntime

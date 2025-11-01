@@ -2,11 +2,21 @@
 # SPDX-FileCopyrightText: Copyright 2024 Arm Limited and/or its affiliates <open-source-office@arm.com>
 # Licensed under the MIT License.
 
+include(CheckLanguage)
+
 # Minimum CMake required
 cmake_minimum_required(VERSION 3.28)
 
 # Don't let cmake set a default value for CMAKE_CUDA_ARCHITECTURES
 cmake_policy(SET CMP0104 OLD)
+
+# For ROCm builds with MSVC, prevent CMAKE_MSVC_RUNTIME_LIBRARY from being used
+# This must be done before the project() command to prevent CMake from setting defaults
+if(onnxruntime_USE_ROCM AND WIN32)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "" CACHE STRING "MSVC runtime library selection" FORCE)
+  message(STATUS "Disabled CMAKE_MSVC_RUNTIME_LIBRARY for ROCm build")
+endif()
+
 # Project
 project(onnxruntime C CXX ASM)
 
@@ -75,6 +85,13 @@ option(onnxruntime_USE_CUDA "Build with CUDA support" OFF)
 # use. If you hit any problem with that, please do not report it to GTest. Turn OFF the following build option instead.
 cmake_dependent_option(onnxruntime_ENABLE_CUDA_EP_INTERNAL_TESTS "Build with CUDA unit tests" OFF "onnxruntime_USE_CUDA;onnxruntime_BUILD_UNIT_TESTS" OFF)
 
+check_language(HIP)
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_EXTENSIONS OFF)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+cmake_dependent_option(onnxruntime_USE_HIPCXX "Build with HIPCXX support" OFF "CMAKE_HIP_COMPILER" OFF)
+
+
 cmake_dependent_option(onnxruntime_USE_CUDA_NHWC_OPS "Build CUDA with NHWC op support" ON "onnxruntime_USE_CUDA" OFF)
 option(onnxruntime_CUDA_MINIMAL "Build CUDA without any operations apart from memcpy ops. Usefuel for a very minial TRT build" OFF)
 option(onnxruntime_ENABLE_CUDA_LINE_NUMBER_INFO "When building with CUDA support, generate device code line number information." OFF)
@@ -138,6 +155,7 @@ option(onnxruntime_ENABLE_INSTRUMENT "Enable Instrument with Event Tracing for W
 option(onnxruntime_USE_TELEMETRY "Build with Telemetry" OFF)
 cmake_dependent_option(onnxruntime_USE_MIMALLOC "Override new/delete and arena allocator with mimalloc" OFF "WIN32;NOT onnxruntime_USE_CUDA;NOT onnxruntime_USE_OPENVINO" OFF)
 option(onnxruntime_USE_CANN "Build with CANN support" OFF)
+option(onnxruntime_USE_ROCM "Build with AMD GPU support" OFF)
 option(onnxruntime_USE_XNNPACK "Build with XNNPACK support. Provides an alternative math library on ARM, WebAssembly and x86." OFF)
 option(onnxruntime_USE_WEBNN "Build with WebNN support. Enable hardware acceleration in web browsers." OFF)
 option(onnxruntime_USE_WEBGPU "Build with WebGPU support. Enable WebGPU via C/C++ interface." OFF)
@@ -203,6 +221,7 @@ option(onnxruntime_WEBASSEMBLY_RUN_TESTS_IN_BROWSER "Enable this option to run t
 option(onnxruntime_ENABLE_WEBASSEMBLY_DEBUG_INFO "Enable this option to turn on DWARF format debug info" OFF)
 option(onnxruntime_ENABLE_WEBASSEMBLY_PROFILING "Enable this option to turn on WebAssembly profiling and preserve function names" OFF)
 option(onnxruntime_ENABLE_WEBASSEMBLY_OUTPUT_OPTIMIZED_MODEL "Enable this option to allow WebAssembly to output optimized model" OFF)
+option(onnxruntime_ENABLE_WEBASSEMBLY_MEMORY64 "Enable this option to allow WebAssembly to use 64bit memory" OFF)
 option(onnxruntime_ENABLE_WEBASSEMBLY_RELAXED_SIMD "Enable WebAssembly Relaxed SIMD" OFF)
 
 # Enable bitcode for iOS
@@ -232,6 +251,7 @@ option(onnxruntime_PREBUILT_PYTORCH_PATH "Path to pytorch installation dir")
 option(onnxruntime_EXTERNAL_TRANSFORMER_SRC_PATH "Path to external transformer src dir")
 
 option(onnxruntime_ENABLE_CUDA_PROFILING "Enable CUDA kernel profiling" OFF)
+option(onnxruntime_ENABLE_ROCM_PROFILING "Enable ROCM kernel profiling" OFF)
 
 option(onnxruntime_ENABLE_CPUINFO "Enable cpuinfo" ON)
 
@@ -240,6 +260,25 @@ option(onnxruntime_ENABLE_ATEN "Enable ATen fallback" OFF)
 
 # dlpack support
 cmake_dependent_option(onnxruntime_ENABLE_DLPACK "Enable dlpack" ON "onnxruntime_ENABLE_TRAINING OR onnxruntime_ENABLE_ATEN OR onnxruntime_ENABLE_PYTHON" OFF)
+
+# Triton support
+option(onnxruntime_ENABLE_TRITON "Enable Triton" OFF)
+
+# composable kernel is managed automatically, unless user want to explicitly disable it, it should not be manually set
+if(WIN32)
+  option(onnxruntime_USE_COMPOSABLE_KERNEL "Enable composable kernel for ROCm EP" OFF)
+else()
+  option(onnxruntime_USE_COMPOSABLE_KERNEL "Enable composable kernel for ROCm EP" ON)
+endif()
+cmake_dependent_option(onnxruntime_USE_COMPOSABLE_KERNEL_CK_TILE "Enable ck_tile for composable kernel" ON "onnxruntime_USE_COMPOSABLE_KERNEL" OFF)
+option(onnxruntime_USE_ROCBLAS_EXTENSION_API "Enable rocblas tuning for ROCm EP" OFF)
+option(onnxruntime_USE_TRITON_KERNEL "Enable triton compiled kernel" OFF)
+option(onnxruntime_BUILD_KERNEL_EXPLORER "Build Kernel Explorer for testing and profiling GPU kernels" OFF)
+
+option(onnxruntime_BUILD_CACHE "onnxruntime build with cache" OFF)
+# https://zeux.io/2010/11/22/z7-everything-old-is-new-again/
+cmake_dependent_option(MSVC_Z7_OVERRIDE "replacing /Zi and /ZI with /Z7 when using MSVC with CCache" ON "onnxruntime_BUILD_CACHE; MSVC" OFF)
+
 option(onnxruntime_USE_AZURE "Build with azure inferencing support" OFF)
 option(onnxruntime_USE_LOCK_FREE_QUEUE "Build with lock-free task queue for threadpool." OFF)
 option(onnxruntime_FORCE_GENERIC_ALGORITHMS "Disable optimized arch-specific algorithms. Use only for testing and debugging generic algorithms." OFF)
@@ -287,6 +326,209 @@ if (onnxruntime_ENABLE_TRAINING_APIS)
   endif()
 endif()
 
+if (onnxruntime_USE_ROCM)
+  if (onnxruntime_USE_CUDA)
+    message(FATAL_ERROR "ROCM does not support build with CUDA!")
+  endif()
+  # Note: MSVC runtime library settings are disabled globally for ROCm builds and
+  # handled manually via compile flags in onnxruntime_set_compile_flags
+
+  # replicate strategy used by pytorch to get ROCM_VERSION
+  # https://github.com/pytorch/pytorch/blob/main/cmake/public/LoadHIP.cmake
+  # with modification
+
+  # If ROCM_PATH is set, assume intention is to compile with
+  # ROCm support and error out if the ROCM_PATH does not exist.
+  # Else ROCM_PATH does not exist, assume a default of /opt/rocm
+  # In the latter case, if /opt/rocm does not exist emit status
+  # message and return.
+  if(DEFINED ENV{ROCM_PATH})
+    file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
+  if(NOT EXISTS ${ROCM_PATH})
+    message(FATAL_ERROR
+      "ROCM_PATH environment variable is set to ${ROCM_PATH} but does not exist.\n"
+      "Set a valid ROCM_PATH or unset ROCM_PATH environment variable to fix.")
+  endif()
+  else()
+  if(UNIX)
+    set(ROCM_PATH /opt/rocm)
+  else() # Win32
+    set(ROCM_PATH C:/opt/rocm)
+  endif()
+  if(NOT EXISTS ${ROCM_PATH})
+    message(STATUS
+        "ROCM_PATH environment variable is not set and ${ROCM_PATH} does not exist.\n"
+        "Building without ROCm support.")
+    return()
+  endif()
+  endif()
+
+  # Add HIP to the CMAKE Module Path
+  # needed because the find_package call to this module uses the Module mode search
+  # https://cmake.org/cmake/help/latest/command/find_package.html#search-modes
+  if(UNIX)
+    set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${CMAKE_MODULE_PATH})
+  else() # Win32
+    set(CMAKE_MODULE_PATH ${ROCM_PATH}/cmake/ ${CMAKE_MODULE_PATH})
+  endif()
+  # Add ROCM_PATH to CMAKE_PREFIX_PATH, needed because the find_package
+  # call to individual ROCM components uses the Config mode search
+  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+
+  macro(find_package_and_print_version PACKAGE_NAME)
+    find_package("${PACKAGE_NAME}" ${ARGN})
+    if(NOT ${PACKAGE_NAME}_FOUND)
+      message("Optional package ${PACKAGE_NAME} not found")
+    else()
+      message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+      if(${PACKAGE_NAME}_INCLUDE_DIR)
+        list(APPEND ROCM_INCLUDE_DIRS ${${PACKAGE_NAME}_INCLUDE_DIR})
+      endif()
+    endif()
+  endmacro()
+
+  # Find the HIP Package
+  # MODULE argument is added for clarity that CMake is searching
+  # for FindHIP.cmake in Module mode
+  find_package_and_print_version(HIP 1.0 MODULE)
+
+  if(HIP_FOUND)
+    set(PYTORCH_FOUND_HIP TRUE)
+    find_package_and_print_version(hip REQUIRED CONFIG)
+    find_package_and_print_version(rocblas REQUIRED)
+
+    # The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
+    find_package(rocm-core CONFIG)
+
+    # Some old consumer HIP SDKs do not distribute rocm_version.h, so we allow
+    # falling back to the hip version, which everyone should have.
+    # rocm_version.h lives in the rocm-core package and hip_version.h lives in the
+    # hip (lower-case) package. Both are probed above and will be in
+    # ROCM_INCLUDE_DIRS if available.
+    find_file(ROCM_VERSION_HEADER_PATH
+      NAMES rocm-core/rocm_version.h hip/hip_version.h
+      NO_DEFAULT_PATH
+      PATHS ${ROCM_INCLUDE_DIRS}
+    )
+    if(ROCM_VERSION_HEADER_PATH MATCHES "rocm-core/rocm_version.h$")
+      set(ROCM_LIB_NAME "ROCM")
+    else()
+      set(ROCM_LIB_NAME "HIP")
+    endif()
+
+    if(NOT ROCM_VERSION_HEADER_PATH)
+      message(FATAL_ERROR "Could not find hip/hip_version.h or rocm-core/rocm_version.h in ${ROCM_INCLUDE_DIRS}")
+    endif()
+    get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
+
+    if(EXISTS ${ROCM_VERSION_HEADER_PATH})
+      set(ROCM_HEADER_FILE ${ROCM_VERSION_HEADER_PATH})
+    else()
+      message(FATAL_ERROR "********************* ${ROCM_HEADER_NAME} could not be found ******************\n")
+    endif()
+
+    # Read the ROCM headerfile into a variable
+    message(STATUS "Reading ROCM version from: ${ROCM_HEADER_FILE}")
+    message(STATUS "Content: ${ROCM_HEADER_CONTENT}")
+    file(READ "${ROCM_HEADER_FILE}" ROCM_HEADER_CONTENT)
+
+    # Below we use a RegEx to find ROCM version numbers.
+    # Note that CMake does not support \s for blank space. That is
+    # why in the regular expressions below we have a blank space in
+    # the square brackets.
+    # There are three steps:
+    # 1. Match regular expression
+    # 2. Strip the non-numerical part of the string
+    # 3. Strip leading and trailing spaces
+
+    string(REGEX MATCH "${ROCM_LIB_NAME}_VERSION_MAJOR[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+    string(REPLACE "${ROCM_LIB_NAME}_VERSION_MAJOR" "" TEMP2 ${TEMP1})
+    string(STRIP ${TEMP2} ROCM_VERSION_DEV_MAJOR)
+    string(REGEX MATCH "${ROCM_LIB_NAME}_VERSION_MINOR[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+    string(REPLACE "${ROCM_LIB_NAME}_VERSION_MINOR" "" TEMP2 ${TEMP1})
+    string(STRIP ${TEMP2} ROCM_VERSION_DEV_MINOR)
+    string(REGEX MATCH "${ROCM_LIB_NAME}_VERSION_PATCH[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+    string(REPLACE "${ROCM_LIB_NAME}_VERSION_PATCH" "" TEMP2 ${TEMP1})
+    string(STRIP ${TEMP2} ROCM_VERSION_DEV_PATCH)
+
+    # Create ROCM_VERSION_DEV_INT which is later used as a preprocessor macros
+    set(ROCM_VERSION_DEV "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}.${ROCM_VERSION_DEV_PATCH}")
+    math(EXPR ROCM_VERSION_DEV_INT "(${ROCM_VERSION_DEV_MAJOR}*10000) + (${ROCM_VERSION_DEV_MINOR}*100) + ${ROCM_VERSION_DEV_PATCH}")
+
+    message("\n***** ROCm version from ${ROCM_HEADER_NAME} ****\n")
+    message("ROCM_VERSION_DEV: ${ROCM_VERSION_DEV}")
+    message("ROCM_VERSION_DEV_MAJOR: ${ROCM_VERSION_DEV_MAJOR}")
+    message("ROCM_VERSION_DEV_MINOR: ${ROCM_VERSION_DEV_MINOR}")
+    message("ROCM_VERSION_DEV_PATCH: ${ROCM_VERSION_DEV_PATCH}")
+    message("ROCM_VERSION_DEV_INT:   ${ROCM_VERSION_DEV_INT}")
+
+    message("HIP_VERSION_MAJOR: ${HIP_VERSION_MAJOR}")
+    message("HIP_VERSION_MINOR: ${HIP_VERSION_MINOR}")
+    message("\n***** HIP LANGUAGE CONFIG INFO ****\n")
+    message("CMAKE_HIP_COMPILER:      ${CMAKE_HIP_COMPILER}")
+    message("CMAKE_HIP_ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
+    message("CMAKE_HIP_FLAGS:         ${CMAKE_HIP_FLAGS}")
+    string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
+    message("CMAKE_HIP_FLAGS_${BUILD_TYPE}: ${CMAKE_HIP_FLAGS_${BUILD_TYPE}}")
+    add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
+  else()
+    message(FATAL_ERROR "ROCm not found")
+  endif()
+
+  if (NOT CMAKE_HIP_ARCHITECTURES)
+    if (ROCM_VERSION_DEV VERSION_LESS "6.2")
+      message(FATAL_ERROR "CMAKE_HIP_ARCHITECTURES is not set when ROCm version < 6.2")
+    else()
+      set(CMAKE_HIP_ARCHITECTURES "gfx908;gfx90a;gfx1030;gfx1100;gfx1101;gfx940;gfx941;gfx942;gfx1200;gfx1201")
+    endif()
+  endif()
+
+  file(GLOB rocm_cmake_components ${onnxruntime_ROCM_HOME}/lib/cmake/*)
+  list(APPEND CMAKE_PREFIX_PATH ${rocm_cmake_components})
+  # Force cmake to accept the configured HIP compiler. Because the configured CMAKE_PREFIX_PATH does not work during
+  # enable_language(HIP), we might need to move configuring of CMAKE_PREFIX_PATH to build.py (in the future).
+  set(CMAKE_HIP_COMPILER_FORCED ON)
+  find_package(ROCmCMakeBuildTools 0.7.3 CONFIG QUIET PATHS "${ROCM_ROOT}")
+  # message(FATAL_ERROR "ROCmCMakeBuildTools_FOUND: ${ROCmCMakeBuildTools_FOUND}")
+
+  enable_language(HIP)
+
+  # message(FATAL_ERROR "CMAKE_HIP_COMPILER: ${CMAKE_HIP_COMPILER}")
+
+  # NOTE: Flags -mllvm -amdgpu-early-inline-all=true are critical for gpu kernel code performance. -mllvm passes the
+  # next flag to underlying LLVM instead of clang and -amdgpu-early-inline-all=true is the optimization flag for LLVM.
+  # With CMake's enable_language(HIP), additional flags including the proceeding one are propagated from
+  # hip-lang::device library. But in some weird cases, the hip-lang::device target may not be properly configured, for
+  # example, the CMAKE_PREFIX_PATH might be improperly configured.
+  if(onnxruntime_USE_HIPCXX AND NOT DEFINED _CMAKE_HIP_DEVICE_RUNTIME_TARGET)
+    message(FATAL_ERROR "HIP Language is not properly configured.")
+  endif()
+  add_compile_options("$<$<COMPILE_LANGUAGE:HIP>:SHELL:-x hip>")
+
+  # Apply dynamic runtime library globally for all languages when using MSVC with ROCm
+  if(MSVC)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/MD$<$<CONFIG:Debug>:d>>")
+    add_compile_options("$<$<COMPILE_LANGUAGE:HIP>:/MD$<$<CONFIG:Debug>:d>>")
+  endif()
+
+  if (NOT onnxruntime_HIPIFY_PERL)
+    set(onnxruntime_HIPIFY_PERL ${CMAKE_CURRENT_SOURCE_DIR}/../tools/hipify-perl)
+  endif()
+
+  if (onnxruntime_USE_COMPOSABLE_KERNEL AND ROCM_VERSION_DEV VERSION_LESS "5.3")
+    message(WARNING "composable kernel is only supported on ROCm >= 5.3")
+    set(onnxruntime_USE_COMPOSABLE_KERNEL OFF)
+    set(onnxruntime_USE_COMPOSABLE_KERNEL_CK_TILE OFF)
+  endif()
+  if (onnxruntime_USE_COMPOSABLE_KERNEL_CK_TILE AND ROCM_VERSION_DEV VERSION_LESS "6.0")
+    message(WARNING "ck_tile can only be enabled on ROCm >= 6.0 due to compatibility and compilation speed, disable automatically")
+    set(onnxruntime_USE_COMPOSABLE_KERNEL_CK_TILE OFF)
+  endif()
+  if (onnxruntime_USE_COMPOSABLE_KERNEL_CK_TILE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(WARNING "ck_tile hits compiler error in Debug build, disable automatically")
+    set(onnxruntime_USE_COMPOSABLE_KERNEL_CK_TILE OFF)
+  endif()
+endif()
 
 # Single output directory for all binaries
 set(RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin CACHE PATH "Single output directory for all binaries.")
@@ -573,28 +815,59 @@ get_filename_component(ORTTRAINING_ROOT "${ORTTRAINING_ROOT}" ABSOLUTE)
 get_filename_component(REPO_ROOT "${REPO_ROOT}" ABSOLUTE)
 set(ONNXRUNTIME_INCLUDE_DIR ${REPO_ROOT}/include/onnxruntime)
 
+# Configure dependency runtime libraries to match the main project
+# When using ROCm with MSVC, we handle runtime library settings differently to avoid HIP compiler issues
+if(MSVC AND NOT onnxruntime_USE_ROCM)
+  if(CMAKE_MSVC_RUNTIME_LIBRARY)
+    if(CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "^MultiThreaded(Debug)?$")
+      # Static runtime - ensure all dependencies use the same
+      set(protobuf_MSVC_STATIC_RUNTIME ON CACHE BOOL "Build protobuf with static runtime" FORCE)
+      set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "Build abseil with static runtime" FORCE)
+      set(gtest_force_shared_crt OFF CACHE BOOL "Use static runtime for GTest" FORCE)
+      set(ONNX_USE_MSVC_STATIC_RUNTIME ON CACHE BOOL "Build ONNX with static runtime" FORCE)
+    else()
+      # Dynamic runtime
+      set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "Build protobuf with dynamic runtime" FORCE)
+      set(ABSL_MSVC_STATIC_RUNTIME OFF CACHE BOOL "Build abseil with dynamic runtime" FORCE)
+      set(gtest_force_shared_crt ON CACHE BOOL "Use dynamic runtime for GTest" FORCE)
+      set(ONNX_USE_MSVC_STATIC_RUNTIME OFF CACHE BOOL "Build ONNX with dynamic runtime" FORCE)
+    endif()
+  endif()
+elseif(MSVC AND onnxruntime_USE_ROCM)
+  # For ROCm builds with MSVC, always use dynamic runtime for dependencies to match our manual /MD flag
+  set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "Build protobuf with dynamic runtime" FORCE)
+  set(ABSL_MSVC_STATIC_RUNTIME OFF CACHE BOOL "Build abseil with dynamic runtime" FORCE)
+  set(gtest_force_shared_crt ON CACHE BOOL "Use dynamic runtime for GTest" FORCE)
+  set(ONNX_USE_MSVC_STATIC_RUNTIME OFF CACHE BOOL "Build ONNX with dynamic runtime" FORCE)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/external)
 include(external/onnxruntime_external_deps.cmake)
 
 set(ORT_WARNING_FLAGS)
 if (WIN32)
-    # class needs to have dll-interface to be used by clients
-    list(APPEND ORT_WARNING_FLAGS "/wd4251")
-    # issued by thrust nonstandard extension used: nameless struct/union
-    list(APPEND ORT_WARNING_FLAGS "/wd4201")
-    # structure was padded due to __declspec(align())
-    list(APPEND ORT_WARNING_FLAGS "/wd4324")
-    # warning C4800: Implicit conversion from 'X' to bool. Possible information loss
-    if (onnxruntime_USE_OPENVINO OR onnxruntime_USE_OPENVINO_INTERFACE)
-       list(APPEND ORT_WARNING_FLAGS "/wd4800")
+
+
+
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      # class needs to have dll-interface to be used by clients
+      list(APPEND ORT_WARNING_FLAGS "/wd4251")
+      # issued by thrust nonstandard extension used: nameless struct/union
+      list(APPEND ORT_WARNING_FLAGS "/wd4201")
+      # structure was padded due to __declspec(align())
+      list(APPEND ORT_WARNING_FLAGS "/wd4324")
+      # warning C4800: Implicit conversion from 'X' to bool. Possible information loss
+      if (onnxruntime_USE_OPENVINO OR onnxruntime_USE_OPENVINO_INTERFACE)
+        list(APPEND ORT_WARNING_FLAGS "/wd4800")
+      endif()
+      # operator 'operator-name': deprecated between enumerations of different types
+      list(APPEND ORT_WARNING_FLAGS "/wd5054")
+      # Enable warning: data member 'member' will be initialized after data member 'member2' / base class 'base_class'
+      list(APPEND ORT_WARNING_FLAGS "/w15038")
     endif()
-    # operator 'operator-name': deprecated between enumerations of different types
-    list(APPEND ORT_WARNING_FLAGS "/wd5054")
-    # Enable warning: data member 'member' will be initialized after data member 'member2' / base class 'base_class'
-    list(APPEND ORT_WARNING_FLAGS "/w15038")
 
     # set linker flags to minimize the binary size.
-    if (MSVC)
+    if (MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
       foreach(type EXE STATIC SHARED)
         if (NOT type MATCHES STATIC)
           # The WinML internal toolchain does not allow link's "additional options" to contain optimization
@@ -931,6 +1204,10 @@ if (onnxruntime_USE_ARMNN)
     list(APPEND ORT_PROVIDER_FLAGS  -DUSE_ARMNN=1)
     list(APPEND ONNXRUNTIME_PROVIDER_NAMES armnn)
 endif()
+if (onnxruntime_USE_ROCM)
+    list(APPEND ORT_PROVIDER_FLAGS  -DUSE_ROCM=1)
+    list(APPEND ONNXRUNTIME_PROVIDER_NAMES rocm)
+endif()
 if (onnxruntime_USE_COREML)
     list(APPEND ORT_PROVIDER_FLAGS  -DUSE_COREML=1)
     list(APPEND ONNXRUNTIME_PROVIDER_NAMES coreml)
@@ -1025,6 +1302,36 @@ if (onnxruntime_ENABLE_LAZY_TENSOR)
 endif()
 
 function(onnxruntime_set_compile_flags target_name)
+    # Handle MSVC runtime library for ROCm builds (for all languages)
+    if (onnxruntime_USE_ROCM AND MSVC)
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:/MD$<$<CONFIG:Debug>:d>>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:HIP>:/MD$<$<CONFIG:Debug>:d>>")
+    endif()
+
+    if (onnxruntime_USE_ROCM AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-parameter>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-command-line-argument>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-undefined-var-template>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-value>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-private-field>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-label>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-variable>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-function>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-sign-compare>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-error>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-fms-extensions>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-deprecated-copy-with-user-provided-copy>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-missing-field-initializers>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-microsoft-cast>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-but-set-variable>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-inconsistent-missing-override>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-logical-op-parentheses>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-missing-braces>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-switch>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-cast-function-type-mismatch>")
+      target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-lambda-capture>")
+      target_link_libraries(${target_name} PRIVATE hip::host)
+    endif()
     if (CPUINFO_SUPPORTED)
       onnxruntime_add_include_to_target(${target_name} cpuinfo::cpuinfo)
     endif()
@@ -1179,6 +1486,32 @@ function(onnxruntime_set_compile_flags target_name)
           target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wno-strict-aliasing>")
       endif()
     endif()
+    if (onnxruntime_USE_ROCM)
+      # flags are detected with CXX language mode, some flags are not supported with hipclang
+      # because we may mix gcc and hipclang
+      set(ORT_HIP_WARNING_FLAGS ${ORT_WARNING_FLAGS})
+      list(REMOVE_ITEM ORT_HIP_WARNING_FLAGS -Wno-nonnull-compare)
+      # Unsupported by Clang 18 yet.
+      list(REMOVE_ITEM ORT_HIP_WARNING_FLAGS -Wno-dangling-reference)
+
+      list(REMOVE_ITEM ORT_HIP_WARNING_FLAGS -Wno-interference-size)
+      # float16.h:90:12: error: ‘tmp’ is used uninitialized
+      list(APPEND ORT_HIP_WARNING_FLAGS -Wno-uninitialized)
+      list(APPEND ORT_HIP_WARNING_FLAGS -Wno-deprecated-copy)
+
+      # some #pragma unroll will fail, do not treat them as error
+      # #warning must not be treated as error
+      list(APPEND ORT_HIP_WARNING_FLAGS -Wno-error=pass-failed "-Wno-error=#warnings")
+
+      # otherwise error: builtin __has_trivial_assign is deprecated; use __is_trivially_assignable instead
+      if (ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.4")
+        list(APPEND ORT_HIP_WARNING_FLAGS "-Wno-deprecated-builtins")
+      endif()
+
+      foreach(FLAG ${ORT_HIP_WARNING_FLAGS})
+        target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:HIP>:SHELL:${FLAG}>")
+      endforeach()
+    endif()
 endfunction()
 
 function(onnxruntime_set_source_file_properties target_name)
@@ -1192,6 +1525,13 @@ endfunction()
 
 function(onnxruntime_configure_target target_name)
   target_link_directories(${target_name} PRIVATE ${onnxruntime_LINK_DIRS})
+
+  # For ROCm builds with MSVC, explicitly clear MSVC_RUNTIME_LIBRARY property to prevent
+  # CMake from applying it to HIP files in mixed-language targets
+  if(onnxruntime_USE_ROCM AND MSVC)
+    set_property(TARGET ${target_name} PROPERTY MSVC_RUNTIME_LIBRARY "")
+  endif()
+
   onnxruntime_set_compile_flags(${target_name})
   onnxruntime_set_source_file_properties(${target_name})
   if(WIN32 AND onnxruntime_ENABLE_STATIC_ANALYSIS AND onnxruntime_USE_CUSTOM_STATIC_ANALYSIS_RULES)
@@ -1205,6 +1545,14 @@ function(onnxruntime_configure_target target_name)
     set_target_properties(${target_name} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     set_target_properties(${target_name} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
     set_target_properties(${target_name} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL TRUE)
+  endif()
+
+  if (onnxruntime_BUILD_KERNEL_EXPLORER)
+    get_target_property(target_type ${target_name} TYPE)
+    if (target_type STREQUAL "MODULE_LIBRARY" OR target_type STREQUAL "SHARED_LIBRARY")
+      set_property(TARGET ${target_name}
+        APPEND_STRING PROPERTY LINK_FLAGS " -Xlinker --version-script=${ONNXRUNTIME_ROOT}/python/tools/kernel_explorer/version_script.lds ")
+    endif()
   endif()
 
   # Keep BinSkim happy
@@ -1512,6 +1860,10 @@ if (onnxruntime_ENABLE_CUDA_PROFILING)
   add_compile_definitions(ENABLE_CUDA_PROFILING)
 endif()
 
+if (onnxruntime_ENABLE_ROCM_PROFILING)
+  add_compile_definitions(ENABLE_ROCM_PROFILING)
+endif()
+
 if (onnxruntime_ENABLE_TRAINING)
   add_compile_definitions(ENABLE_TRAINING_CORE)
   add_compile_definitions(ENABLE_STRIDED_TENSORS)
@@ -1534,7 +1886,7 @@ if (UNIX OR onnxruntime_USE_NCCL)
   if (onnxruntime_USE_NCCL)
     if (onnxruntime_USE_CUDA)
       set(NCCL_LIBNAME "nccl")
-    elseif (onnxruntime_USE_MIGRAPHX)
+    elseif (onnxruntime_USE_ROCM OR onnxruntime_USE_MIGRAPHX)
       set(NCCL_LIBNAME "rccl")
     endif()
     find_path(NCCL_INCLUDE_DIR
@@ -1737,6 +2089,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   if (onnxruntime_ENABLE_WEBASSEMBLY_OUTPUT_OPTIMIZED_MODEL)
     add_compile_definitions(ORT_ENABLE_WEBASSEMBLY_OUTPUT_OPTIMIZED_MODEL)
   endif()
+endif()
+
+if(onnxruntime_BUILD_KERNEL_EXPLORER)
+  message(STATUS "Kernel Explorer Build is enabled")
+  list(APPEND ONNXRUNTIME_CMAKE_FILES onnxruntime_kernel_explorer)
 endif()
 
 # When GDK_PLATFORM is set then WINAPI_FAMILY is defined in gdk_toolchain.cmake (along with other relevant flags/definitions).
