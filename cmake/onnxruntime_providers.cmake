@@ -95,7 +95,9 @@ endif()
 if(onnxruntime_USE_ARMNN)
   set(PROVIDERS_ARMNN onnxruntime_providers_armnn)
 endif()
-
+if(onnxruntime_USE_ROCM)
+  set(PROVIDERS_ROCM onnxruntime_providers_rocm)
+endif()
 if (onnxruntime_USE_XNNPACK)
   set(PROVIDERS_XNNPACK onnxruntime_providers_xnnpack)
 endif()
@@ -184,6 +186,10 @@ endif()
 
 if (onnxruntime_USE_ARMNN)
   include(onnxruntime_providers_armnn.cmake)
+endif()
+
+if (onnxruntime_USE_ROCM)
+  include(onnxruntime_providers_rocm.cmake)
 endif()
 
 if (onnxruntime_USE_VSINPU)

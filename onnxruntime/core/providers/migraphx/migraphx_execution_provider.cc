@@ -248,7 +248,7 @@ std::vector<AllocatorPtr> MIGraphXExecutionProvider::CreatePreferredAllocators()
       device_id_);
   AllocatorCreationInfo pinned_allocator_info(
       [](OrtDevice::DeviceId device_id) {
-        return std::make_unique<MIGraphXPinnedAllocator>(device_id, CUDA_PINNED);
+        return std::make_unique<HIPPinnedAllocator>(device_id, onnxruntime::CUDA_PINNED);
       },
       device_id_);
   return std::vector<AllocatorPtr>{CreateAllocator(default_memory_info), CreateAllocator(pinned_allocator_info)};
