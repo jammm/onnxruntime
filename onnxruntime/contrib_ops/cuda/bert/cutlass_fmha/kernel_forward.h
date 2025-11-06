@@ -31,7 +31,12 @@
 
 #pragma once
 
+#ifndef __HIPCC__
 #include "core/providers/cuda/curand_wrapper.h"
+#else
+#include <hiprand/hiprand.h>
+#include <hiprand/hiprand_kernel.h>
+#endif
 
 #ifdef HAS_PYTORCH
 #include <ATen/cuda/CUDAGeneratorImpl.h>

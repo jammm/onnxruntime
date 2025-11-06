@@ -149,7 +149,7 @@ IAllocatorUniquePtr<void> RocmTuningContext::GetScratchBuffer(
     return nullptr;
   }
 
-  return IAllocator::MakeUniquePtr<void>(it->second, num_bytes, false, stream, WaitRocmNotificationOnDevice);
+  return IAllocator::MakeUniquePtr<void>(it->second, num_bytes, false, stream);
 }
 
 }  // namespace tunable

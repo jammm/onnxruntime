@@ -27,7 +27,7 @@ void ROCMAllocator::SetDevice(bool throw_when_fail) const {
   int current_device;
   auto hip_err = hipGetDevice(&current_device);
   if (hip_err == hipSuccess) {
-    int allocator_device_id = Info().id;
+    int allocator_device_id = Info().device.Id();
     if (current_device != allocator_device_id) {
       hip_err = hipSetDevice(allocator_device_id);
     }

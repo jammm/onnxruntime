@@ -15,7 +15,9 @@
 #include <miopen/miopen.h>
 #include <rocblas/rocblas.h>
 #include <hipblas/hipblas.h>
+#ifndef _WIN32
 #include <rocm_smi/rocm_smi.h>
+#endif
 
 #ifdef ORT_USE_NCCL
 #include <rccl/rccl.h>

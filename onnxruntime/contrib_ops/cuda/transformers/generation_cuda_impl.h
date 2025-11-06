@@ -4,7 +4,12 @@
 #pragma once
 
 #include <stdint.h>
+#ifndef __HIPCC__
 #include "core/providers/cuda/curand_wrapper.h"
+#else
+#include <hiprand/hiprand.h>
+#include <hiprand/hiprand_kernel.h>
+#endif
 #include <cuda_fp16.h>
 
 #include <cstdio>

@@ -94,9 +94,9 @@ if (onnxruntime_BUILD_UNIT_TESTS)
     endif()
   endif()
 
-  if (onnxruntime_USE_ROCM)
-    target_compile_options(onnxruntime_training_runner PUBLIC -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1)
-  endif()
+  #if (onnxruntime_USE_ROCM)
+  #  target_compile_options(onnxruntime_training_runner PUBLIC -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1)
+  #endif()
 
   set_target_properties(onnxruntime_training_runner PROPERTIES FOLDER "ONNXRuntimeTest")
   source_group(TREE ${REPO_ROOT} FILES ${onnxruntime_training_runner_srcs} ${onnxruntime_perf_test_src})

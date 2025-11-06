@@ -74,6 +74,24 @@ if (onnxruntime_BUILD_UNIT_TESTS)
     FIND_PACKAGE_ARGS 1.14.0...<2.0.0 NAMES GTest
   )
   FetchContent_MakeAvailable(googletest)
+
+  # Add -Wno-unused-command-line-argument for clang-cl builds
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND MSVC)
+    foreach(target gtest gtest_main gmock gmock_main)
+      if(TARGET ${target})
+        target_compile_options(${target} PRIVATE -Wno-unused-command-line-argument)
+      endif()
+    endforeach()
+  endif()
+
+  # For ROCm builds with MSVC, ensure gtest uses dynamic runtime
+  if(onnxruntime_USE_ROCM AND MSVC)
+    foreach(target gtest gtest_main gmock gmock_main)
+      if(TARGET ${target})
+        target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:/MD$<$<CONFIG:Debug>:d>>")
+      endif()
+    endforeach()
+  endif()
 endif()
 
 if (onnxruntime_BUILD_BENCHMARKS)
@@ -465,6 +483,10 @@ onnxruntime_fetchcontent_declare(
 
 onnxruntime_fetchcontent_makeavailable(flatbuffers)
 if(NOT flatbuffers_FOUND)
+  # For ROCm builds with MSVC, ensure flatbuffers uses dynamic runtime
+  if(onnxruntime_USE_ROCM AND MSVC AND TARGET flatbuffers)
+    target_compile_options(flatbuffers PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:/MD$<$<CONFIG:Debug>:d>>")
+  endif()
   if(NOT TARGET flatbuffers::flatbuffers)
     add_library(flatbuffers::flatbuffers ALIAS flatbuffers)
   endif()

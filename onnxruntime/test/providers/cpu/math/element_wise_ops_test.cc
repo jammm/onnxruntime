@@ -3813,8 +3813,15 @@ TEST(MathOpTest, Mean_8) {
 #define MATH_NO_EXCEPT noexcept
 #endif
 
+#if defined(_MSC_VER) && defined(__clang__)
+// clang-cl needs a different approach for math function templates
+// Use a function pointer type to avoid template deduction issues
+using FloatMathFunc = float(*)(float);
+void TrigFloatTest(FloatMathFunc op, OpTester& test, std::initializer_list<float> input, float abs_error = -1.0f) {
+#else
 template <float (&op)(float value) MATH_NO_EXCEPT>
 void TrigFloatTest(OpTester& test, std::initializer_list<float> input, float abs_error = -1.0f) {
+#endif
   std::vector<int64_t> dims{static_cast<int64_t>(input.size())};
 
   std::vector<float> output;
@@ -3831,9 +3838,15 @@ void TrigFloatTest(OpTester& test, std::initializer_list<float> input, float abs
   test.Run();
 }
 
+#if defined(_MSC_VER) && defined(__clang__)
+using DoubleMathFunc = double(*)(double);
+void TrigDoubleTest(DoubleMathFunc op, OpTester& test, std::initializer_list<double> input,
+                    const std::unordered_set<std::string> excluded_provider_types = {}) {
+#else
 template <double (&op)(double value) MATH_NO_EXCEPT>
 void TrigDoubleTest(OpTester& test, std::initializer_list<double> input,
                     const std::unordered_set<std::string> excluded_provider_types = {}) {
+#endif
   std::vector<int64_t> dims{static_cast<int64_t>(input.size())};
 
   std::vector<double> output;
@@ -3845,8 +3858,13 @@ void TrigDoubleTest(OpTester& test, std::initializer_list<double> input,
   test.Run(OpTester::ExpectResult::kExpectSuccess, "", excluded_provider_types);
 }
 
+#if defined(_MSC_VER) && defined(__clang__)
+// Reuse FloatMathFunc from above
+void TrigFloat16Test(FloatMathFunc op, OpTester& test, std::initializer_list<float> input) {
+#else
 template <float (&op)(float value) MATH_NO_EXCEPT>
 void TrigFloat16Test(OpTester& test, std::initializer_list<float> input) {
+#endif
   std::vector<int64_t> dims{static_cast<int64_t>(input.size())};
 
   std::vector<MLFloat16> float16_input;
@@ -3862,30 +3880,50 @@ void TrigFloat16Test(OpTester& test, std::initializer_list<float> input) {
 }
 TEST(MathOpTest, SinFloat) {
   OpTester test("Sin");
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::sinf), test, {1.1f, -1.1f, 2.2f, -2.2f});
+#else
   TrigFloatTest<::sinf>(test, {1.1f, -1.1f, 2.2f, -2.2f});
+#endif
 }
 
 TEST(MathOpTest, SinDouble) {
   OpTester test("Sin");
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigDoubleTest(static_cast<DoubleMathFunc>(::sin), test, {1.1, -1.1, 2.2, -2.2});
+#else
   TrigDoubleTest<::sin>(test, {1.1, -1.1, 2.2, -2.2});
+#endif
 }
 
 TEST(MathOpTest, SinFloat16) {
   if (DefaultCudaExecutionProvider().get() != nullptr) {  // MLFloat16 type not supported on CPU
     OpTester test("Sin");
+#if defined(_MSC_VER) && defined(__clang__)
+    TrigFloat16Test(static_cast<FloatMathFunc>(::sinf), test, {1.1f, -1.1f, 2.2f, -2.2f});
+#else
     TrigFloat16Test<::sinf>(test, {1.1f, -1.1f, 2.2f, -2.2f});
+#endif
   }
 }
 
 TEST(MathOpTest, CosFloat) {
   OpTester test("Cos");
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::cosf), test, {1.1f, -1.1f, 2.2f, -2.2f});
+#else
   TrigFloatTest<::cosf>(test, {1.1f, -1.1f, 2.2f, -2.2f});
+#endif
 }
 
 TEST(MathOpTest, CosDouble) {
   if (DefaultCudaExecutionProvider().get() != nullptr) {  // double type not supported on CPU
     OpTester test("Cos");
+#if defined(_MSC_VER) && defined(__clang__)
+    TrigDoubleTest(static_cast<DoubleMathFunc>(::cos), test, {1.1, -1.1, 2.2, -2.2}, {kTensorrtExecutionProvider});
+#else
     TrigDoubleTest<::cos>(test, {1.1, -1.1, 2.2, -2.2}, {kTensorrtExecutionProvider});
+#endif
     // Fails TensorRT unit-test because the unit tests only test one EP at a time and the TensorRT EP will not be able to find an implementation in the fall-back CPU EP,
     // so skip it
   }
@@ -3894,13 +3932,21 @@ TEST(MathOpTest, CosDouble) {
 TEST(MathOpTest, CosFloat16) {
   if (DefaultCudaExecutionProvider().get() != nullptr) {  // MLFloat16 type not supported on CPU
     OpTester test("Cos");
+#if defined(_MSC_VER) && defined(__clang__)
+    TrigFloat16Test(static_cast<FloatMathFunc>(::cosf), test, {1.1f, -1.1f, 2.2f, -2.2f});
+#else
     TrigFloat16Test<::cosf>(test, {1.1f, -1.1f, 2.2f, -2.2f});
+#endif
   }
 }
 
 TEST(MathOpTest, Tan) {
   OpTester test("Tan");
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::tanf), test, {-100.0f, -50.0f, 0.0f, 50.0f, 100.0f});
+#else
   TrigFloatTest<::tanf>(test, {-100.0f, -50.0f, 0.0f, 50.0f, 100.0f});
+#endif
 }
 
 TEST(MathOpTest, Asin) {
@@ -3913,42 +3959,74 @@ TEST(MathOpTest, Asin) {
           :
 #endif
           -1.0f;
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::asinf), test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f}, abs_error);
+#else
   TrigFloatTest<::asinf>(test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f}, abs_error);
+#endif
 }
 
 TEST(MathOpTest, Acos) {
   OpTester test("Acos");
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::acosf), test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#else
   TrigFloatTest<::acosf>(test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#endif
 }
 
 TEST(MathOpTest, Atan) {
   OpTester test("Atan");
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::atanf), test, {-10.0f, -5.0f, 0.0f, 5.0f, 10.0f});
+#else
   TrigFloatTest<::atanf>(test, {-10.0f, -5.0f, 0.0f, 5.0f, 10.0f});
+#endif
 }
 
 TEST(MathOpTest, Sinh) {
   OpTester test("Sinh", 9);
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::sinhf), test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#else
   TrigFloatTest<::sinhf>(test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#endif
 }
 
 TEST(MathOpTest, Cosh) {
   OpTester test("Cosh", 9);
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::coshf), test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#else
   TrigFloatTest<::coshf>(test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#endif
 }
 
 TEST(MathOpTest, Asinh) {
   OpTester test("Asinh", 9);
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::asinhf), test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#else
   TrigFloatTest<::asinhf>(test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#endif
 }
 
 TEST(MathOpTest, Acosh) {
   OpTester test("Acosh", 9);
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::acoshf), test, {1.0f, 1.1f, 3.0f, 10.0f, 100.0f});
+#else
   TrigFloatTest<::acoshf>(test, {1.0f, 1.1f, 3.0f, 10.0f, 100.0f});
+#endif
 }
 
 TEST(MathOpTest, Atanh) {
   OpTester test("Atanh", 9);
+#if defined(_MSC_VER) && defined(__clang__)
+  TrigFloatTest(static_cast<FloatMathFunc>(::atanhf), test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#else
   TrigFloatTest<::atanhf>(test, {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f});
+#endif
 }
 
 TEST(MathOpTest, Expand_8_3x3_string) {

@@ -1076,7 +1076,8 @@ def generate_build_tree(
                 # Always enable debug info even in release build. The debug information is in separated *.pdb files that
                 # can be easily discarded when debug symbols are not needed. We enable it by default because many auditting
                 # tools need to use the symbols.
-                add_default_definition(cmake_extra_defines, "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT", "ProgramDatabase")
+                if not args.use_rocm:
+                    add_default_definition(cmake_extra_defines, "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT", "ProgramDatabase")
 
         if number_of_parallel_jobs(args) > 0:
             # https://devblogs.microsoft.com/cppblog/improved-parallelism-in-msbuild/
@@ -2309,8 +2310,6 @@ def main():
     log.debug("Command line arguments:\n  {}".format(" ".join(shlex.quote(arg) for arg in sys.argv[1:])))  # noqa: G001
 
     args = parse_arguments()
-
-    print(args)
 
     if os.getenv("ORT_BUILD_WITH_CACHE") == "1":
         args.use_cache = True

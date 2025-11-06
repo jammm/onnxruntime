@@ -18,6 +18,7 @@ set(contrib_ops_excluded_files
   "bert/attention_prepare_qkv.cu"
   "bert/attention_kernel_options.h"
   "bert/attention_kernel_options.cc"
+  "bert/attention_transpose.cu"
   "bert/decoder_attention_impl.h"
   "bert/decoder_attention_impl.cu"
   "bert/decoder_masked_multihead_attention.h"
@@ -44,6 +45,8 @@ set(contrib_ops_excluded_files
   "bert/packed_multihead_attention.cc"
   "bert/packed_multihead_attention_impl.h"
   "bert/packed_multihead_attention_impl.cu"
+  "bert/paged_attention.cc"
+  "bert/paged_attention_impl.cu"
   "diffusion/group_norm_impl.cu"
   "diffusion/nhwc_conv.cc"
   "math/gemm_float8.cc"
@@ -57,9 +60,13 @@ set(contrib_ops_excluded_files
   "quantization/attention_quantization_impl.cuh"
   "quantization/dequantize_blockwise_bnb4.cuh"
   "quantization/dequantize_blockwise_bnb4.cu"
+  "quantization/dequantize_blockwise_8bits.cu"
+  "quantization/dequantize_blockwise_4bits.cu"
   "quantization/matmul_bnb4.cc"
   "quantization/matmul_bnb4.cuh"
   "quantization/matmul_bnb4.cu"
+  "quantization/matmul_4bits.cu"
+  "quantization/matmul_nbits.cc"
   "quantization/moe_quantization.h"
   "quantization/moe_quantization.cc"
   "quantization/quantize_dequantize_linear.cc"
@@ -95,10 +102,13 @@ set(contrib_ops_excluded_files
   "bert/group_query_attention.cc"
   "bert/group_query_attention_impl.h"
   "bert/group_query_attention_impl.cu"
+  "bert/embed_layer_norm_impl.cu"
   "collective/custom_*"
   "collective/distributed_*"
   "collective/ipc_*"
   "collective/shard*"
+  "llm/cutlass*"
+  "llm/cutlass_extensions/*"
 )
 
 if (NOT onnxruntime_USE_NCCL)
@@ -193,7 +203,7 @@ set(training_ops_excluded_files
   "nn/conv_grad.cc"
   "nn/conv_grad.h"
   "reduction/reduction_all.cc"  # deterministic = true, ignore ctx setting
-  "reduction/reduction_ops.cc"  # no double type support
+  # "reduction/reduction_ops.cc"  # Removing from exclusion - needed for kernel implementations
   "cuda_training_kernels.cc"
   "cuda_training_kernels.h"
   "nn/conv_shared.cc"
@@ -236,7 +246,7 @@ function(hipify cuda_dir in_excluded_file_patterns out_generated_cc_files out_ge
     set(f_out "${CMAKE_CURRENT_BINARY_DIR}/amdgpu/${rocm_f_rel}")
     add_custom_command(
       OUTPUT ${f_out}
-      COMMAND Python3::Interpreter ${hipify_tool}
+      COMMAND python -X utf8 ${hipify_tool}
               --hipify_perl ${onnxruntime_HIPIFY_PERL}
               ${f} -o ${f_out}
       DEPENDS ${hipify_tool} ${f}

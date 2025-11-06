@@ -78,7 +78,8 @@ struct ProviderInfo_ROCM_Impl final : ProviderInfo_ROCM {
     return std::make_unique<ROCMAllocator>(device_id, name);
   }
 
-  std::unique_ptr<IAllocator> CreateROCMPinnedAllocator(const char* name) override {
+  std::unique_ptr<IAllocator> CreateROCMPinnedAllocator(int16_t device_id, const char* name) override {
+    ORT_UNUSED_PARAMETER(device_id);
     return std::make_unique<ROCMPinnedAllocator>(name);
   }
 
@@ -112,9 +113,9 @@ struct ProviderInfo_ROCM_Impl final : ProviderInfo_ROCM {
     int device;
     HIP_CALL_THROW(hipGetDevice(&device));
 
-    if (device != src_location.id) {
+    if (device != src_location.device.Id()) {
       // Need to switch to the allocating device.
-      HIP_CALL_THROW(hipSetDevice(src_location.id));
+      HIP_CALL_THROW(hipSetDevice(src_location.device.Id()));
       // Copy from GPU to CPU.
       HIP_CALL_THROW(hipMemcpy(dst_ptr, src_ptr, size, hipMemcpyDeviceToHost));
       // Switch back to current device.

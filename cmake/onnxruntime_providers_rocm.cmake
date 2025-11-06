@@ -47,16 +47,26 @@
   message("MIOPEN_VERSION_DEV_INT:   ${MIOPEN_VERSION_DEV_INT}")
   add_definitions(-DMIOPEN_VERSION=${MIOPEN_VERSION_DEV_INT})
 
-  find_library(RCCL_LIB rccl REQUIRED)
-  find_library(ROCTRACER_LIB roctracer64 REQUIRED)
-  find_package(rocm_smi REQUIRED)
-  set(ONNXRUNTIME_ROCM_LIBS roc::hipblas MIOpen hip::hipfft ${ROCM_SMI_LIBRARY} ${RCCL_LIB} ${ROCTRACER_LIB})
-  include_directories(${ROCM_SMI_INCLUDE_DIR})
-  link_directories(${ROCM_SMI_LIB_DIR})
+  if(NOT WIN32)
+    find_library(RCCL_LIB rccl REQUIRED)
+    find_library(ROCTRACER_LIB roctracer64 REQUIRED)
+    find_package(rocm_smi REQUIRED)
+    set(ONNXRUNTIME_ROCM_LIBS roc::hipblas MIOpen hip::hipfft ${ROCM_SMI_LIBRARY} ${RCCL_LIB} ${ROCTRACER_LIB})
+    include_directories(${ROCM_SMI_INCLUDE_DIR})
+    link_directories(${ROCM_SMI_LIB_DIR})
+  else()
+    set(ONNXRUNTIME_ROCM_LIBS roc::hipblas MIOpen hip::hipfft)
+  endif()
 
   file(GLOB_RECURSE onnxruntime_providers_rocm_cc_srcs CONFIGURE_DEPENDS
     "${ONNXRUNTIME_ROOT}/core/providers/rocm/*.h"
     "${ONNXRUNTIME_ROOT}/core/providers/rocm/*.cc"
+  )
+  list(REMOVE_ITEM onnxruntime_providers_rocm_cc_srcs
+    "${ONNXRUNTIME_ROOT}/core/providers/rocm/roctracer_manager.h"
+    "${ONNXRUNTIME_ROOT}/core/providers/rocm/roctracer_manager.cc"
+    "${ONNXRUNTIME_ROOT}/core/providers/rocm/rocm_profiler.h"
+    "${ONNXRUNTIME_ROOT}/core/providers/rocm/rocm_profiler.cc"
   )
 
   # The shared_library files are in a separate list since they use precompiled headers, and the above files have them disabled.
@@ -113,16 +123,60 @@
     list(APPEND onnxruntime_providers_rocm_src ${onnxruntime_rocm_generated_training_ops_cc_srcs} ${onnxruntime_rocm_generated_training_ops_cu_srcs})
   endif()
 
-  auto_set_source_files_hip_language(${onnxruntime_providers_rocm_src})
-  onnxruntime_add_shared_library_module(onnxruntime_providers_rocm ${onnxruntime_providers_rocm_src})
-  target_compile_options(onnxruntime_providers_rocm PRIVATE -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1)
-  target_link_options(onnxruntime_providers_rocm PRIVATE -T ${REPO_ROOT}/cmake/hip_fatbin_insert)
-
-  if(NOT MSVC)
-    target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-sign-compare)
-    target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-unused-parameter)
-    target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-undefined-var-template)
+  # Set HIP language for all source files including generated ones
+  set(all_rocm_src ${onnxruntime_providers_rocm_src})
+  list(APPEND all_rocm_src ${onnxruntime_providers_rocm_generated_cc_srcs} ${onnxruntime_providers_rocm_generated_cu_srcs})
+  if(NOT onnxruntime_DISABLE_CONTRIB_OPS)
+    list(APPEND all_rocm_src ${onnxruntime_rocm_generated_contrib_ops_cc_srcs} ${onnxruntime_rocm_generated_contrib_ops_cu_srcs})
   endif()
+  if(onnxruntime_ENABLE_TRAINING_OPS)
+    list(APPEND all_rocm_src ${onnxruntime_rocm_generated_training_ops_cc_srcs} ${onnxruntime_rocm_generated_training_ops_cu_srcs})
+  endif()
+
+  auto_set_source_files_hip_language(${all_rocm_src})
+
+  # Ensure generated files are marked as GENERATED
+  set_source_files_properties(${onnxruntime_providers_rocm_generated_cc_srcs} PROPERTIES GENERATED TRUE)
+  set_source_files_properties(${onnxruntime_providers_rocm_generated_cu_srcs} PROPERTIES GENERATED TRUE)
+
+  onnxruntime_add_shared_library_module(onnxruntime_providers_rocm ${onnxruntime_providers_rocm_src})
+
+  # Explicitly add generated sources to the target
+  # This ensures CMake properly tracks dependencies for generated files
+  target_sources(onnxruntime_providers_rocm PRIVATE
+    ${onnxruntime_providers_rocm_generated_cc_srcs}
+    ${onnxruntime_providers_rocm_generated_cu_srcs}
+  )
+  if(NOT onnxruntime_DISABLE_CONTRIB_OPS)
+    target_sources(onnxruntime_providers_rocm PRIVATE
+      ${onnxruntime_rocm_generated_contrib_ops_cc_srcs}
+      ${onnxruntime_rocm_generated_contrib_ops_cu_srcs}
+    )
+  endif()
+  if(onnxruntime_ENABLE_TRAINING_OPS)
+    target_sources(onnxruntime_providers_rocm PRIVATE
+      ${onnxruntime_rocm_generated_training_ops_cc_srcs}
+      ${onnxruntime_rocm_generated_training_ops_cu_srcs}
+    )
+  endif()
+
+  # Ensure MSVC runtime library is handled via compile options for all files
+  if(MSVC)
+    # Apply dynamic runtime to C/CXX files
+    target_compile_options(onnxruntime_providers_rocm PUBLIC "$<$<COMPILE_LANGUAGE:C,CXX>:/MD$<$<CONFIG:Debug>:d>>")
+    # Apply dynamic runtime to HIP files
+    target_compile_options(onnxruntime_providers_rocm PUBLIC "$<$<COMPILE_LANGUAGE:HIP>:/MD$<$<CONFIG:Debug>:d>>")
+  endif()
+
+  # target_compile_options(onnxruntime_providers_rocm PRIVATE -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1)
+  # target_link_options(onnxruntime_providers_rocm PRIVATE -T ${REPO_ROOT}/cmake/hip_fatbin_insert)
+
+  target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-sign-compare)
+  target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-unused-parameter)
+  target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-undefined-var-template)
+  target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-unused-command-line-argument)
+  target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-switch)
+  target_compile_options(onnxruntime_providers_rocm PRIVATE -Wno-instantiation-after-specialization)
 
   onnxruntime_add_include_to_target(onnxruntime_providers_rocm onnxruntime_common onnxruntime_framework onnx onnx_proto ${PROTOBUF_LIB} flatbuffers::flatbuffers Boost::mp11 safeint_interface)
   if (onnxruntime_ENABLE_TRAINING_OPS)
@@ -142,7 +196,7 @@
     ${onnxruntime_rocm_generated_training_ops_cu_srcs})
 
   add_dependencies(onnxruntime_providers_rocm generate_hipified_files onnxruntime_providers_shared ${onnxruntime_EXTERNAL_DEPENDENCIES})
-  target_link_libraries(onnxruntime_providers_rocm PRIVATE ${ONNXRUNTIME_ROCM_LIBS} ${ONNXRUNTIME_PROVIDERS_SHARED} ${ABSEIL_LIBS} Eigen3::Eigen)
+  target_link_libraries(onnxruntime_providers_rocm PRIVATE ${ONNXRUNTIME_ROCM_LIBS} ${ONNXRUNTIME_PROVIDERS_SHARED} ${ABSEIL_LIBS} Eigen3::Eigen hip::device)
   target_include_directories(onnxruntime_providers_rocm SYSTEM
     PRIVATE
       ${ONNXRUNTIME_ROOT}
@@ -213,6 +267,8 @@
 
   if(UNIX)
     set_property(TARGET onnxruntime_providers_rocm APPEND_STRING PROPERTY LINK_FLAGS "-Xlinker --version-script=${ONNXRUNTIME_ROOT}/core/providers/rocm/version_script.lds -Xlinker --gc-sections")
+  elseif(WIN32)
+    set_property(TARGET onnxruntime_providers_rocm APPEND_STRING PROPERTY LINK_FLAGS "-Xlinker /DEF:${ONNXRUNTIME_ROOT}/core/providers/rocm/version_script.def")
   else()
     message(FATAL_ERROR "onnxruntime_providers_rocm unknown platform, need to specify shared library exports for it")
   endif()

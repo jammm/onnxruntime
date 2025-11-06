@@ -58,7 +58,11 @@ struct Float8E4M3FN {
     val = __nv_cvt_float_to_fp8(v, saturate ? __NV_SATFINITE : __NV_NOSAT, __NV_E4M3);
 #else
     uint32_t b;
+    #if defined(__HIP__)
+    memcpy(&b, &v, sizeof(b));
+    #else
     std::memcpy(&b, &v, sizeof(b));
+    #endif
 
     val = static_cast<uint8_t>((b & 0x80000000) >> 24);  // sign
     if ((b & 0x7fffffff) == 0x7f800000) {                // infinity
@@ -161,7 +165,11 @@ struct Float8E4M3FN {
       }
     }
     float float_res;
+    #if defined(__HIP__)
+    memcpy(&float_res, &res, sizeof(float));
+    #else
     std::memcpy(&float_res, &res, sizeof(float));
+    #endif
     return float_res;
 #endif
   }
@@ -224,7 +232,11 @@ struct Float8E4M3FNUZ {
   inline explicit ORT_HOST_DEVICE Float8E4M3FNUZ(float v, bool saturate = true) {
     // This type does not exist on CUDA.
     uint32_t b;
+    #if defined(__HIP__)
+    memcpy(&b, &v, sizeof(b));
+    #else
     std::memcpy(&b, &v, sizeof(b));
+    #endif
 
     val = static_cast<uint8_t>((b & 0x80000000) >> 24);  // sign
     if ((b & 0x7fffffff) == 0x7f800000) {                // infinity
@@ -325,7 +337,11 @@ struct Float8E4M3FNUZ {
       }
     }
     float float_res;
+    #if defined(__HIP__)
+    memcpy(&float_res, &res, sizeof(float));
+    #else
     std::memcpy(&float_res, &res, sizeof(float));
+    #endif
     return float_res;
   }
 
@@ -384,7 +400,11 @@ struct Float8E5M2 {
     val = __nv_cvt_float_to_fp8(v, saturate ? __NV_SATFINITE : __NV_NOSAT, __NV_E5M2);
 #else
     uint32_t b;
+    #if defined(__HIP__)
+    memcpy(&b, &v, sizeof(b));
+    #else
     std::memcpy(&b, &v, sizeof(b));
+    #endif
 
     val = (b & 0x80000000) >> 24;          // sign
     if ((b & 0x7FFFFFFF) == 0x7F800000) {  // inf
@@ -489,7 +509,11 @@ struct Float8E5M2 {
     }
 
     float float_res;
+    #if defined(__HIP__)
+    memcpy(&float_res, &res, sizeof(float));
+    #else
     std::memcpy(&float_res, &res, sizeof(float));
+    #endif
     return float_res;
 #endif
   }
@@ -552,7 +576,11 @@ struct Float8E5M2FNUZ {
   inline explicit ORT_HOST_DEVICE Float8E5M2FNUZ(float v, bool saturate = true) {
     // This type does not exist on CUDA.
     uint32_t b;
+    #if defined(__HIP__)
+    memcpy(&b, &v, sizeof(b));
+    #else
     std::memcpy(&b, &v, sizeof(b));
+    #endif
 
     val = (b & 0x80000000) >> 24;          // sign
     if ((b & 0x7FFFFFFF) == 0x7F800000) {  // inf
@@ -644,7 +672,11 @@ struct Float8E5M2FNUZ {
     }
 
     float float_res;
+    #if defined(__HIP__)
+    memcpy(&float_res, &res, sizeof(float));
+    #else
     std::memcpy(&float_res, &res, sizeof(float));
+    #endif
     return float_res;
   }
 

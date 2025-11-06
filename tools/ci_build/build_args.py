@@ -646,6 +646,7 @@ def add_execution_provider_args(parser: argparse.ArgumentParser) -> None:
     # See https://github.com/microsoft/onnxruntime/pull/25580#issuecomment-3335056846 for benchmarking details.
     cpu_group.add_argument(
         "--enable_arm_neon_nchwc", action="store_true", help="Enables building with NCHWc ARM kernels."
+    )
     # --- ROCm ---
     rocm_group = parser.add_argument_group("ROCm Execution Provider")
     rocm_group.add_argument("--use_rocm", action="store_true", help="Enable ROCm EP.")

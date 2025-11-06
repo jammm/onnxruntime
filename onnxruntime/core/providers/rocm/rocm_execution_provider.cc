@@ -9,7 +9,9 @@
 #include "core/providers/rocm/rocm_allocator.h"
 #include "core/providers/rocm/rocm_fwd.h"
 #include "core/providers/rocm/gpu_data_transfer.h"
+#ifndef _WIN32
 #include "core/providers/rocm/rocm_profiler.h"
+#endif
 #include "core/session/onnxruntime_run_options_config_keys.h"
 
 #ifndef DISABLE_CONTRIB_OPS
@@ -151,9 +153,7 @@ AllocatorPtr ROCMExecutionProvider::CreateRocmAllocator(OrtDevice::DeviceId devi
         {default_memory_arena_cfg ? *default_memory_arena_cfg
                                   : OrtArenaCfg(gpu_mem_limit, static_cast<int>(arena_extend_strategy), -1, -1, -1, -1L)},
         // make it stream aware
-        true,
-        // enable cross stream sharing?
-        false);
+        true);
 
     // ROCM malloc/free is expensive so always use an arena
     return CreateAllocator(default_memory_info);
@@ -321,9 +321,12 @@ ITuningContext* ROCMExecutionProvider::GetTuningContext() const {
 }
 
 std::unique_ptr<profiling::EpProfiler> ROCMExecutionProvider::GetProfiler() {
+  #ifndef _WIN32
   return std::make_unique<profiling::RocmProfiler>();
+  #else
+  return nullptr;
+  #endif
 }
-
 ROCMExecutionProvider::PerThreadContext& ROCMExecutionProvider::GetPerThreadContext() const {
   const auto& per_thread_context_cache = PerThreadContextCache();
 

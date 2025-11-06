@@ -147,6 +147,9 @@ function(AddTest)
   if (WIN32)
     # include dbghelp in case tests throw an ORT exception, as that exception includes a stacktrace, which requires dbghelp.
     target_link_libraries(${_UT_TARGET} PRIVATE debug dbghelp)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      target_compile_options(${_UT_TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-command-line-argument>")
+    endif()
 
     if (MSVC)
       # warning C6326: Potential comparison of a constant with another constant.
@@ -154,8 +157,8 @@ function(AddTest)
       target_compile_options(${_UT_TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd6326>"
                 "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd6326>")
       # Raw new and delete. A lot of such things came from googletest.
-      target_compile_options(${_UT_TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26409>"
-                "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26409>")
+      #target_compile_options(${_UT_TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26409>"
+      #                  "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26409>")
       # "Global initializer calls a non-constexpr function."
       target_compile_options(${_UT_TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26426>"
                 "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26426>")
@@ -1111,7 +1114,8 @@ if (onnxruntime_USE_ROCM)
       target_compile_definitions(onnxruntime_test_all PRIVATE USE_COMPOSABLE_KERNEL_CK_TILE)
     endif()
   endif()
-  target_compile_options(onnxruntime_test_all PRIVATE -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1)
+  #target_compile_options(onnxruntime_test_all PRIVATE -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1)
+  target_compile_options(onnxruntime_test_all PRIVATE -Wno-unused-command-line-argument)
   target_include_directories(onnxruntime_test_all PRIVATE  ${onnxruntime_ROCM_HOME}/hipfft/include ${onnxruntime_ROCM_HOME}/include ${onnxruntime_ROCM_HOME}/hiprand/include ${onnxruntime_ROCM_HOME}/rocrand/include ${CMAKE_CURRENT_BINARY_DIR}/amdgpu/onnxruntime ${CMAKE_CURRENT_BINARY_DIR}/amdgpu/orttraining)
 endif()
 if (onnxruntime_ENABLE_TRAINING_TORCH_INTEROP)
@@ -1359,8 +1363,8 @@ if (NOT onnxruntime_ENABLE_TRAINING_TORCH_INTEROP)
       target_compile_options(onnxruntime_benchmark PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd4141>"
                         "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd4141>")
       # Avoid using new and delete. But this is a benchmark program, it's ok if it has a chance to leak.
-      target_compile_options(onnxruntime_benchmark PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26409>"
-                        "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26409>")
+      #target_compile_options(onnxruntime_benchmark PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26409>"
+      #                  "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26409>")
       target_compile_options(onnxruntime_benchmark PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26400>"
                         "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26400>")
       target_compile_options(onnxruntime_benchmark PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26814>"
@@ -1386,7 +1390,7 @@ if (NOT onnxruntime_ENABLE_TRAINING_TORCH_INTEROP)
     if(WIN32)
       target_link_libraries(onnxruntime_mlas_benchmark PRIVATE debug Dbghelp)
       # Avoid using new and delete. But this is a benchmark program, it's ok if it has a chance to leak.
-      target_compile_options(onnxruntime_mlas_benchmark PRIVATE /wd26409)
+      #target_compile_options(onnxruntime_mlas_benchmark PRIVATE /wd26409)
       # "Global initializer calls a non-constexpr function." BENCHMARK_CAPTURE macro needs this.
       target_compile_options(onnxruntime_mlas_benchmark PRIVATE /wd26426)
     else()
@@ -1596,7 +1600,7 @@ endif()
     endif()
     if (onnxruntime_USE_ROCM)
       target_include_directories(onnxruntime_shared_lib_test PRIVATE ${onnxruntime_ROCM_HOME}/include)
-      target_compile_definitions(onnxruntime_shared_lib_test PRIVATE __HIP_PLATFORM_AMD__)
+      # target_compile_definitions(onnxruntime_shared_lib_test PRIVATE __HIP_PLATFORM_AMD__)
     endif()
 
     if (CMAKE_SYSTEM_NAME STREQUAL "Android")
@@ -1676,8 +1680,8 @@ endif()
     )
     onnxruntime_add_executable(onnxruntime_mlas_test ${onnxruntime_mlas_test_src})
     if(MSVC)
-      target_compile_options(onnxruntime_mlas_test PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26409>"
-                  "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26409>")
+      #target_compile_options(onnxruntime_mlas_test PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26409>"
+      #            "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26409>")
       target_compile_options(onnxruntime_mlas_test PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /utf-8>"
               "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/utf-8>")
       target_compile_options(onnxruntime_mlas_test PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd6326>"
@@ -1803,7 +1807,9 @@ if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "${ONNXRUNTIME_SHARED_LIB_TEST_SRC_DIR}/rocm_ops.hip"
         "${TEST_SRC_DIR}/testdata/custom_op_library/rocm/rocm_ops.*")
     list(APPEND custom_op_lib_include ${onnxruntime_ROCM_HOME}/include)
-    list(APPEND custom_op_lib_option "-D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1")
+    #list(APPEND custom_op_lib_option "-D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1")
+    list(APPEND custom_op_lib_option -Wno-unused-command-line-argument)
+    list(APPEND custom_op_lib_link hip::device hip::host)
   endif()
 
   file(GLOB custom_op_src ${custom_op_src_patterns})
@@ -1821,8 +1827,8 @@ if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   else()
     set(ONNXRUNTIME_CUSTOM_OP_LIB_LINK_FLAG "-DEF:${TEST_SRC_DIR}/testdata/custom_op_library/custom_op_library.def")
     if (NOT onnxruntime_USE_CUDA)
-      target_compile_options(custom_op_library PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26409>"
-                    "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26409>")
+      #target_compile_options(custom_op_library PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--compiler-options /wd26409>"
+      #                  "$<$<NOT:$<COMPILE_LANGUAGE:CUDA>>:/wd26409>")
     endif()
   endif()
   set_property(TARGET custom_op_library APPEND_STRING PROPERTY LINK_FLAGS ${ONNXRUNTIME_CUSTOM_OP_LIB_LINK_FLAG})

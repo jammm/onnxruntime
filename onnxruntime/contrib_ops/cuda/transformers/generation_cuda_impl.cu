@@ -425,7 +425,16 @@ __global__ void BeamSearchScorer_Process(BeamScorerState& state_cpu,
     //  Check if we are done so that we can save a pad step if all(done)
     if (beam_hyp.beams_used_ == num_beams) {
       if constexpr (!early_stopping) {
+        #ifndef __HIPCC__
         float best_sum_logprobs = *std::max_element(next_scores + batch_start, next_scores + batch_start + top_k);
+        #else
+        float best_sum_logprobs = next_scores[batch_start];
+        for (size_t k = 1; k < top_k; k++) {
+          if (next_scores[batch_start + k] > best_sum_logprobs) {
+            best_sum_logprobs = next_scores[batch_start + k];
+          }
+        }
+        #endif
         if (beam_hyp.CanImprove(best_sum_logprobs, sequence_length)) {
           return;
         }

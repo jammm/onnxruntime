@@ -5,7 +5,7 @@
 
 #include "core/providers/shared_library/provider_api.h"
 #include "core/common/status.h"
-#include "core/framework/float16.h"
+#include "core/common/float16.h"
 #include "core/providers/rocm/rocm_pch.h"
 #include "core/providers/rocm/shared_inc/rocm_call.h"
 #include "core/providers/rocm/shared_inc/fast_divmod.h"
@@ -70,6 +70,7 @@ inline int warpSizeDynamic() {
 
 inline void hipMemGetInfoAlt(uint32_t deviceId, size_t* pFree, size_t* pTotal) {
   const auto status = hipMemGetInfo(pFree, pTotal);
+  #ifndef _WIN32
   if (status != hipSuccess) {
     size_t usedMemory = 0;
     ROCMSMI_CALL_THROW(rsmi_init(0));
@@ -78,6 +79,7 @@ inline void hipMemGetInfoAlt(uint32_t deviceId, size_t* pFree, size_t* pTotal) {
     *pFree = *pTotal - usedMemory;
     ROCMSMI_CALL_THROW(rsmi_shut_down());
   }
+  #endif
 }
 
 }  // namespace rocm

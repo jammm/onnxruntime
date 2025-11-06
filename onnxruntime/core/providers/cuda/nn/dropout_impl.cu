@@ -15,7 +15,12 @@
  */
 
 /* Modifications Copyright (c) Microsoft. */
+#ifndef __HIPCC__
 #include "core/providers/cuda/curand_wrapper.h"
+#else
+#include <hiprand/hiprand.h>
+#include <hiprand/hiprand_kernel.h>
+#endif
 
 #include "core/providers/cuda/nn/dropout_impl.h"
 

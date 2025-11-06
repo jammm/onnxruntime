@@ -30,8 +30,9 @@ std::conditional_t<THRW, void, Status> RocmCall(
 #define HIP_CALL_THROW(expr) (RocmCall<hipError_t, true>((expr), #expr, "HIP", hipSuccess, "", __FILE__, __LINE__))
 #define ROCBLAS_CALL_THROW(expr) (RocmCall<rocblas_status, true>((expr), #expr, "ROCBLAS", rocblas_status_success, "", __FILE__, __LINE__))
 #define HIPBLAS_CALL_THROW(expr) (RocmCall<hipblasStatus_t, true>((expr), #expr, "HIPBLAS", HIPBLAS_STATUS_SUCCESS, "", __FILE__, __LINE__))
+#ifndef _WIN32
 #define ROCMSMI_CALL_THROW(expr) (RocmCall<rsmi_status_t, true>((expr), #expr, "ROCMSMI", RSMI_STATUS_SUCCESS, "", __FILE__, __LINE__))
-
+#endif
 #define HIPSPARSE_CALL_THROW(expr) (RocmCall<hipsparseStatus_t, true>((expr), #expr, "HIPSPARSE", HIPSPARSE_STATUS_SUCCESS, "", __FILE__, __LINE__))
 #define HIPRAND_CALL_THROW(expr) (RocmCall<hiprandStatus_t, true>((expr), #expr, "HIPRAND", HIPRAND_STATUS_SUCCESS, "", __FILE__, __LINE__))
 

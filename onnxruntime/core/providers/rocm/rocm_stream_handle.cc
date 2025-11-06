@@ -38,7 +38,7 @@ struct RocmNotification : public synchronize::Notification {
 
   void Activate() override {
     // record event with hipEventBlockingSync so we can support sync on host without busy wait.
-    HIP_CALL_THROW(hipEventRecord(event_, static_cast<hipStream_t>(stream_.GetHandle())));
+    HIP_CALL_THROW(hipEventRecord(event_, static_cast<hipStream_t>(GetStream().GetHandle())));
   }
 
   void wait_on_device(Stream& device_stream) {
@@ -192,11 +192,12 @@ void* RocmStream::GetResource(int version, int id) const {
 }
 
 // CPU Stream command handles
-void WaitRocmNotificationOnDevice(Stream& stream, synchronize::Notification& notification) {
-  static_cast<RocmNotification*>(&notification)->wait_on_device(stream);
+void WaitRocmNotificationOnDevice(Stream* stream, synchronize::Notification& notification) {
+  assert(stream != nullptr);  // should never happen
+  static_cast<RocmNotification*>(&notification)->wait_on_device(*stream);
 }
 
-void WaitRocmNotificationOnHost(Stream& /*stream*/, synchronize::Notification& notification) {
+void WaitRocmNotificationOnHost(Stream* /*stream*/, synchronize::Notification& notification) {
   static_cast<RocmNotification*>(&notification)->wait_on_host();
 }
 
@@ -230,6 +231,7 @@ void RegisterRocmStreamHandles(IStreamCommandHandleRegistry& stream_handle_regis
                                                                 ep_info](const OrtDevice& device) {
       return std::make_unique<RocmStream>(external_stream, device, cpu_allocator, release_cpu_buffer_on_rocm_stream, false, external_miopen_handle, external_hipblas_handle, ep_info);
     });
+  stream_handle_registry.RegisterSetDeviceFn(device_type, [](OrtDevice::DeviceId id) { HIP_CALL_THROW(hipSetDevice(id)); });
 }
 
 }  // namespace onnxruntime

@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <cuda_fp16.h>
+#include <hip/hip_fp16.h>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -14,10 +14,10 @@
 
 #include <gsl/gsl>
 #include "core/common/float16.h"
-#include "core/providers/cuda/shared_inc/fast_divmod.h"
+#include "core/providers/rocm/shared_inc/fast_divmod.h"
 
 namespace onnxruntime {
-namespace cuda {
+namespace rocm {
 
 enum class SimpleBroadcast : int32_t {
   NoBroadcast = (int32_t)-1,
@@ -37,19 +37,19 @@ template <typename T>
 class IConstantBuffer {
  public:
   virtual ~IConstantBuffer() {};
-  virtual const T* GetBuffer(cudaStream_t stream, size_t count) = 0;
+  virtual const T* GetBuffer(hipStream_t stream, size_t count) = 0;
 };
 
 template <typename T>
 std::unique_ptr<IConstantBuffer<T>> CreateConstantOnes();
 
 template <typename T>
-void Fill(cudaStream_t stream, T* output, T value, int64_t count);
+void Fill(hipStream_t stream, T* output, T value, int64_t count);
 
 /*
   This is a utility wrapper for arbitrary type array
-  Commonly used for passing small list of metadata during cuda kernel launch
-  It's better to pass the array by value than having another cuMemcpy to pass the data to device.
+  Commonly used for passing small list of metadata during hip kernel launch
+  It's better to pass the array by value than having another hipMemcpy to pass the data to device.
 */
 template <typename T, int32_t capacity = 8>
 struct TArray {
@@ -136,7 +136,7 @@ struct NumericLimits<half> {
   }
 
   __inline__ __host__ __device__ static half Max() {
-#if defined(CUDART_MAX_NORMAL_FP16) && !defined(_MSC_VER)  // defined in cuda 12.3 or later
+#if defined(HIPRT_MAX_NORMAL_FP16) && !defined(_MSC_VER)  // defined in cuda 12.3 or later
     return CUDART_MAX_NORMAL_FP16;
 #else
     return 65504.0f;
@@ -181,5 +181,5 @@ constexpr T divUp(T a, T b) { return (a + b - (T)1) / b; }
 template <typename T>
 constexpr T roundUp(T a, T b) { return divUp<T>(a, b) * b; }
 
-}  // namespace cuda
+}  // namespace rocm
 }  // namespace onnxruntime

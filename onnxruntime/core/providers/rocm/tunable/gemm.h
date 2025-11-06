@@ -4,7 +4,7 @@
 #pragma once
 
 #include "core/common/status.h"
-#include "core/framework/float16.h"
+#include "core/common/float16.h"
 #include "core/providers/rocm/tunable/gemm_common.h"
 
 namespace onnxruntime {

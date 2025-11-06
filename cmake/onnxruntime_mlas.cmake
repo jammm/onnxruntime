@@ -189,21 +189,57 @@ function(setup_mlas_source_for_windows)
     file(GLOB_RECURSE mlas_platform_srcs_avx CONFIGURE_DEPENDS
       "${MLAS_SRC_DIR}/intrinsics/avx/*.cpp"
     )
-    set_source_files_properties(${mlas_platform_srcs_avx} PROPERTIES COMPILE_FLAGS "/arch:AVX")
 
     file(GLOB_RECURSE mlas_platform_srcs_avx2 CONFIGURE_DEPENDS
       "${MLAS_SRC_DIR}/intrinsics/avx2/*.cpp"
     )
-    set_source_files_properties(${mlas_platform_srcs_avx2} PROPERTIES COMPILE_FLAGS "/arch:AVX2")
 
-    target_sources(onnxruntime_mlas PRIVATE
+    # Set compiler flags based on compiler type
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      # clang-cl uses gcc-style flags
+      # SSE/SSE2 files
+      set_source_files_properties(${MLAS_SRC_DIR}/qgemm_kernel_sse.cpp PROPERTIES COMPILE_FLAGS "-msse2")
+      set_source_files_properties(${MLAS_SRC_DIR}/qgemm_kernel_sse41.cpp PROPERTIES COMPILE_FLAGS "-msse4.1")
+
+      # AVX files
+      set_source_files_properties(${mlas_platform_srcs_avx} PROPERTIES COMPILE_FLAGS "-mavx -mfma -mf16c")
+
+      # Check if compiler supports AVX-VNNI (for newer processors)
+      include(CheckCXXCompilerFlag)
+      check_cxx_compiler_flag("-mavxvnni" COMPILER_SUPPORTS_AVXVNNI)
+      if(COMPILER_SUPPORTS_AVXVNNI)
+        # AVX2 files that use AVX-VNNI intrinsics need both flags
+        set_source_files_properties(${mlas_platform_srcs_avx2} ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx2.cpp
+          ${MLAS_SRC_DIR}/qgemm_kernel_avx2.cpp ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.cpp
+          PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c -mavxvnni")
+      else()
+        set_source_files_properties(${mlas_platform_srcs_avx2} ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx2.cpp
+          ${MLAS_SRC_DIR}/qgemm_kernel_avx2.cpp ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.cpp
+          PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
+      endif()
+
+      # AVX512 specific files
+      set_source_files_properties(${MLAS_SRC_DIR}/intrinsics/avx512/quantize_avx512f.cpp
+        PROPERTIES COMPILE_FLAGS "-mavx512f")
+      set_source_files_properties(${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx512.cpp
+        PROPERTIES COMPILE_FLAGS "-mfma -mavx512vnni -mavx512bw -mavx512dq -mavx512vl -mavx512f")
+      set_source_files_properties(${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx512vnni.cpp
+        PROPERTIES COMPILE_FLAGS "-mfma -mavx2 -mavx512vnni -mavx512bw -mavx512dq -mavx512vl -mavx512f")
+      set_source_files_properties(${MLAS_SRC_DIR}/qgemm_kernel_amx.cpp
+        PROPERTIES COMPILE_FLAGS "-mavx2 -mavx512bw -mavx512dq -mavx512vl -mavx512f -mamx-tile -mamx-int8")
+    else()
+      # MSVC uses /arch: flags
+      set_source_files_properties(${mlas_platform_srcs_avx} PROPERTIES COMPILE_FLAGS "/arch:AVX")
+      set_source_files_properties(${mlas_platform_srcs_avx2} PROPERTIES COMPILE_FLAGS "/arch:AVX2")
+    endif()
+
+    # Base x64 sources
+    set(mlas_x64_base_srcs
       ${MLAS_SRC_DIR}/dgemm.cpp
       ${mlas_platform_srcs_avx}
       ${mlas_platform_srcs_avx2}
       ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.h
       ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.cpp
-      ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.cpp
-      ${MLAS_SRC_DIR}/qgemm_kernel_amx.cpp
       ${MLAS_SRC_DIR}/qgemm_kernel_avx2.cpp
       ${MLAS_SRC_DIR}/qgemm_kernel_sse.cpp
       ${MLAS_SRC_DIR}/qgemm_kernel_sse41.cpp
@@ -211,7 +247,6 @@ function(setup_mlas_source_for_windows)
       ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx2.cpp
       ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx512.cpp
       ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx512vnni.cpp
-      ${MLAS_SRC_DIR}/amd64/QgemmU8S8KernelAmx.asm
       ${MLAS_SRC_DIR}/amd64/QgemmU8S8KernelAvx2.asm
       ${MLAS_SRC_DIR}/amd64/QgemmU8U8KernelAvx2.asm
       ${MLAS_SRC_DIR}/amd64/QgemmU8X8KernelAvx2.asm
@@ -249,6 +284,18 @@ function(setup_mlas_source_for_windows)
       ${MLAS_SRC_DIR}/amd64/ErfKernelFma3.asm
     )
 
+    # Add AMX sources - these require Intel CPUs with AMX support
+    # For AMD processors, you can set -DONNXRUNTIME_MLAS_DISABLE_AMX=ON to exclude AMX kernels
+    option(ONNXRUNTIME_MLAS_DISABLE_AMX "Disable AMX kernels (for non-Intel CPUs)" OFF)
+    if(NOT ONNXRUNTIME_MLAS_DISABLE_AMX)
+      list(APPEND mlas_x64_base_srcs
+        ${MLAS_SRC_DIR}/qgemm_kernel_amx.cpp
+        ${MLAS_SRC_DIR}/amd64/QgemmU8S8KernelAmx.asm
+      )
+    endif()
+
+    target_sources(onnxruntime_mlas PRIVATE ${mlas_x64_base_srcs})
+
     if(onnxruntime_ENABLE_CONVSYMKERNELAVX2_SAT_CHECKER)
       set_source_files_properties(${MLAS_SRC_DIR}/amd64/ConvSymKernelAvx2.asm PROPERTIES COMPILE_FLAGS "-DENABLE_CONVSYMKERNELAVX2_SAT_CHECKER")
     endif()
@@ -263,6 +310,10 @@ function(setup_mlas_source_for_windows)
       target_sources(onnxruntime_mlas PRIVATE
         ${MLAS_SRC_DIR}/q4gemm_avx512.cpp
       )
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        set_source_files_properties(${MLAS_SRC_DIR}/q4gemm_avx512.cpp
+          PROPERTIES COMPILE_FLAGS "-mfma -mavx512vnni -mavx512bw -mavx512dq -mavx512vl -mavx512f")
+      endif()
     endif()
   else()
     target_sources(onnxruntime_mlas PRIVATE
@@ -685,7 +736,6 @@ else()
           ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx2.cpp
           ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.h
           ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.cpp
-          ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.cpp
         )
         if(CMAKE_CXX_COMPILER_VERSION GREATER_EQUAL 13.1 AND NOT(APPLE))
           set(mlas_platform_srcs_avx2
@@ -699,10 +749,14 @@ message(STATUS "CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
 
 if(NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "11")
           message(STATUS "Using -mavx2 -mfma -mavxvnni flags")
-          set_source_files_properties(${mlas_platform_srcs_avx2} PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c -mavxvnni")
+          set_source_files_properties(${mlas_platform_srcs_avx2} ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx2.cpp
+            ${MLAS_SRC_DIR}/qgemm_kernel_avx2.cpp ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.cpp
+            PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c -mavxvnni")
 else()
           message(STATUS "Using -mavx2 -mfma flags")
-          set_source_files_properties(${mlas_platform_srcs_avx2} PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
+          set_source_files_properties(${mlas_platform_srcs_avx2} ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx2.cpp
+            ${MLAS_SRC_DIR}/qgemm_kernel_avx2.cpp ${MLAS_SRC_DIR}/rotary_embedding_kernel_avx2.cpp
+            PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
 endif()
         set(mlas_platform_srcs_avx512f
           ${MLAS_SRC_DIR}/x86_64/DgemmKernelAvx512F.S
@@ -727,7 +781,7 @@ endif()
         set(mlas_platform_srcs_avx512vnni
           ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx512vnni.cpp
         )
-        set_source_files_properties(${mlas_platform_srcs_avx512vnni} PROPERTIES COMPILE_FLAGS "-mfma -mavx512vnni -mavx512bw -mavx512dq -mavx512vl -mavx512f")
+        set_source_files_properties(${mlas_platform_srcs_avx512vnni} PROPERTIES COMPILE_FLAGS "-mfma -mavx2 -mavx512vnni -mavx512bw -mavx512dq -mavx512vl -mavx512f")
 
         set(mlas_platform_srcs
           ${MLAS_SRC_DIR}/activate_fp16.cpp
@@ -735,6 +789,7 @@ endif()
           ${MLAS_SRC_DIR}/dgemm.cpp
           ${MLAS_SRC_DIR}/pooling_fp16.cpp
           ${MLAS_SRC_DIR}/qgemm_kernel_avx2.cpp
+          ${MLAS_SRC_DIR}/sqnbitgemm_kernel_avx2.cpp
           ${mlas_platform_srcs_sse2}
           ${mlas_platform_srcs_avx}
           ${mlas_platform_srcs_avx2}
@@ -751,14 +806,18 @@ endif()
           set_source_files_properties(${MLAS_SRC_DIR}/q4gemm_avx512.cpp PROPERTIES COMPILE_FLAGS "-mfma -mavx512vnni -mavx512bw -mavx512dq -mavx512vl -mavx512f")
         endif()
         if(NOT APPLE)
-          set(mlas_platform_srcs
-            ${mlas_platform_srcs}
-	        ${MLAS_SRC_DIR}/x86_64/QgemmU8S8KernelAmxCommon.S
-            ${MLAS_SRC_DIR}/qgemm_kernel_amx.cpp
-            ${MLAS_SRC_DIR}/x86_64/QgemmU8S8KernelAmx.S
-            )
-          set_source_files_properties(${MLAS_SRC_DIR}/qgemm_kernel_amx.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mavx512bw -mavx512dq -mavx512vl -mavx512f")
-          set_source_files_properties(${MLAS_SRC_DIR}/x86_64/QgemmU8S8KernelAmx.S PROPERTIES COMPILE_FLAGS "-mavx2 -mavx512bw -mavx512dq -mavx512vl -mavx512f")
+          # Add AMX sources - these require Intel CPUs with AMX support
+          # For AMD processors, you can set -DONNXRUNTIME_MLAS_DISABLE_AMX=ON to exclude AMX kernels
+          if(NOT ONNXRUNTIME_MLAS_DISABLE_AMX)
+            set(mlas_platform_srcs
+              ${mlas_platform_srcs}
+	          ${MLAS_SRC_DIR}/x86_64/QgemmU8S8KernelAmxCommon.S
+              ${MLAS_SRC_DIR}/qgemm_kernel_amx.cpp
+              ${MLAS_SRC_DIR}/x86_64/QgemmU8S8KernelAmx.S
+              )
+            set_source_files_properties(${MLAS_SRC_DIR}/qgemm_kernel_amx.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mavx512bw -mavx512dq -mavx512vl -mavx512f -mamx-tile -mamx-int8")
+            set_source_files_properties(${MLAS_SRC_DIR}/x86_64/QgemmU8S8KernelAmx.S PROPERTIES COMPILE_FLAGS "-mavx2 -mavx512bw -mavx512dq -mavx512vl -mavx512f -mamx-tile -mamx-int8")
+          endif()
         endif()
 
         if(onnxruntime_ENABLE_CONVSYMKERNELAVX2_SAT_CHECKER)

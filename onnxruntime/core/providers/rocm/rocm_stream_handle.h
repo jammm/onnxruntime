@@ -3,7 +3,7 @@
 
 #pragma once
 #include "core/providers/rocm/rocm_pch.h"
-// #include "core/providers/rocm/shared_inc/rocm_utils.h"
+#include "core/providers/rocm/shared_inc/rocm_utils.h"
 #include "core/providers/rocm/shared_inc/rocm_call.h"
 #include "core/framework/stream_handles.h"
 #include "core/providers/rocm/rocm_execution_provider_info.h"
@@ -11,7 +11,7 @@
 namespace onnxruntime {
 
 struct RocmStream;
-void WaitRocmNotificationOnDevice(Stream& stream, synchronize::Notification& notification);
+void WaitRocmNotificationOnDevice(Stream* stream, synchronize::Notification& notification);
 
 struct DeferredCpuAllocator : public OrtAllocator {
   DeferredCpuAllocator(RocmStream&);
@@ -47,8 +47,6 @@ struct RocmStream : Stream {
   void* GetResource(int version, int id) const override;
 
   onnxruntime::IAllocator* GetCpuAllocator() const { return cpu_allocator_.get(); }
-
-  WaitNotificationFn GetWaitNotificationFn() const override { return WaitRocmNotificationOnDevice; }
 
  private:
   std::vector<void*> deferred_cpu_buffers_;

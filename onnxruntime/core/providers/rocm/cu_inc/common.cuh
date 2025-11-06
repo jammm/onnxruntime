@@ -574,7 +574,11 @@ struct alignas(sizeof(T) * vec_size) aligned_vector {
 #define HIP_KERNEL_ASSERT(...) assert(__VA_ARGS__)
 
 // WARP related definitions and functions
-constexpr int GPU_WARP_SIZE = warpSize;
+#ifdef __gfx9__
+constexpr int GPU_WARP_SIZE = 64;
+#else
+constexpr int GPU_WARP_SIZE = 32;
+#endif
 inline int GPU_WARP_SIZE_HOST = warpSizeDynamic();
 
 template <typename T>

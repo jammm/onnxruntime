@@ -130,11 +130,13 @@ if(WIN32)
   endif()
 endif()
 
-if(NOT WIN32 AND NOT APPLE AND NOT ANDROID AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    set_source_files_properties(
-      ${ONNXRUNTIME_ROOT}/core/common/spin_pause.cc
-      PROPERTIES COMPILE_FLAGS "-mwaitpkg"
-    )
+if(NOT APPLE AND NOT ANDROID AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR NOT WIN32)
+      set_source_files_properties(
+        ${ONNXRUNTIME_ROOT}/core/common/spin_pause.cc
+        PROPERTIES COMPILE_FLAGS "-mwaitpkg"
+      )
+    endif()
 endif()
 
 if (onnxruntime_USE_TELEMETRY)
