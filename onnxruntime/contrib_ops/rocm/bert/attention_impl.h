@@ -33,6 +33,7 @@ size_t GetAttentionWorkspaceSize(
     int sequence_length,
     int past_sequence_length);
 
+// BxNxSxH => BxSxNxH or SxBxNxH (reversed_bs is true)
 Status LaunchTransCtx(hipStream_t stream,
                       const int sequence_length, const int batch_size, const int head_size, const int num_heads,
                       const int max_threads_per_block, const bool reversed_bs, const float* input, float* output);
@@ -41,6 +42,11 @@ Status LaunchTransCtx(hipStream_t stream,
                       const int sequence_length, const int batch_size, const int head_size, const int num_heads,
                       const int max_threads_per_block, const bool reversed_bs, const half* input, half* output);
 
+Status LaunchTransCtx(hipStream_t stream,
+                      const int sequence_length, const int batch_size, const int head_size, const int num_heads,
+                      const int max_threads_per_block, const bool reversed_bs, const BFloat16* input, BFloat16* output);
+
+// BxSxMxNxH or SxBxMxNxH (reversed_bs is true) => MxBxNxSxH
 Status LaunchTransQkv(hipStream_t stream, const int matrix_num,
                       const int sequence_length, const int batch_size, const int head_size, const int num_heads,
                       const int max_threads_per_block, const bool reversed_bs, const float* input, float* output,
@@ -49,6 +55,11 @@ Status LaunchTransQkv(hipStream_t stream, const int matrix_num,
 Status LaunchTransQkv(hipStream_t stream, const int matrix_num,
                       const int sequence_length, const int batch_size, const int head_size, const int num_heads,
                       const int max_threads_per_block, const bool reversed_bs, const half* input, half* output,
+                      int total_matrix_count = -1);
+
+Status LaunchTransQkv(hipStream_t stream, const int matrix_num,
+                      const int sequence_length, const int batch_size, const int head_size, const int num_heads,
+                      const int max_threads_per_block, const bool reversed_bs, const BFloat16* input, BFloat16* output,
                       int total_matrix_count = -1);
 
 Status LaunchConcatTensorToTensor(hipStream_t stream,

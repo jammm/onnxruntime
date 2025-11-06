@@ -18,13 +18,13 @@ set(contrib_ops_excluded_files
   "bert/attention_prepare_qkv.cu"
   "bert/attention_kernel_options.h"
   "bert/attention_kernel_options.cc"
-  "bert/attention_transpose.cu"
   "bert/decoder_attention_impl.h"
   "bert/decoder_attention_impl.cu"
   "bert/decoder_masked_multihead_attention.h"
   "bert/decoder_masked_multihead_attention.cc"
   "bert/decoder_masked_self_attention.h"
   "bert/decoder_masked_self_attention.cc"
+  "bert/multihead_attention.cu"
   "bert/multihead_attention.cc"
   "bert/multihead_attention.h"
   "bert/relative_attn_bias.cc"
@@ -66,7 +66,7 @@ set(contrib_ops_excluded_files
   "quantization/matmul_bnb4.cuh"
   "quantization/matmul_bnb4.cu"
   "quantization/matmul_4bits.cu"
-  # "quantization/matmul_nbits.cc"  # Removing from exclusion - needed for MatMulNBits kernel
+  "quantization/matmul_nbits.cc"  # Removing from exclusion - needed for MatMulNBits kernel
   "quantization/moe_quantization.h"
   "quantization/moe_quantization.cc"
   "quantization/quantize_dequantize_linear.cc"
