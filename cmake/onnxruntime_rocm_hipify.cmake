@@ -27,6 +27,7 @@ set(contrib_ops_excluded_files
   "bert/multihead_attention.cu"
   "bert/multihead_attention.cc"
   "bert/multihead_attention.h"
+  "bert/layer_norm.cuh"
   "bert/relative_attn_bias.cc"
   "bert/relative_attn_bias.h"
   "bert/relative_attn_bias_impl.cu"
@@ -102,7 +103,7 @@ set(contrib_ops_excluded_files
   "bert/group_query_attention.cc"
   "bert/group_query_attention_impl.h"
   "bert/group_query_attention_impl.cu"
-  "bert/embed_layer_norm_impl.cu"
+  # "bert/embed_layer_norm_impl.cu"  # Removing from exclusion - needed for LaunchEmbedLayerNormKernel
   "collective/custom_*"
   "collective/distributed_*"
   "collective/ipc_*"
