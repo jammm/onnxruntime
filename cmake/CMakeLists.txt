@@ -395,6 +395,7 @@ if (onnxruntime_USE_ROCM)
   if(HIP_FOUND)
     set(PYTORCH_FOUND_HIP TRUE)
     find_package_and_print_version(hip REQUIRED CONFIG)
+    find_package_and_print_version(rocblas REQUIRED)
 
     # The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
     find_package(rocm-core CONFIG)

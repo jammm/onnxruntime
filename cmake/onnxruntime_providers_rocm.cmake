@@ -220,6 +220,8 @@
     #endif()
   endif()
 
+  target_link_libraries(onnxruntime_providers_rocm PRIVATE roc::rocblas)
+
   if (onnxruntime_USE_ROCBLAS_EXTENSION_API)
     target_compile_definitions(onnxruntime_providers_rocm PRIVATE USE_ROCBLAS_EXTENSION_API)
     target_compile_definitions(onnxruntime_providers_rocm PRIVATE ROCBLAS_NO_DEPRECATED_WARNINGS)

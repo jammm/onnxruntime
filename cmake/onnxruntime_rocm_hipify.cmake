@@ -66,7 +66,7 @@ set(contrib_ops_excluded_files
   "quantization/matmul_bnb4.cuh"
   "quantization/matmul_bnb4.cu"
   "quantization/matmul_4bits.cu"
-  "quantization/matmul_nbits.cc"
+  # "quantization/matmul_nbits.cc"  # Removing from exclusion - needed for MatMulNBits kernel
   "quantization/moe_quantization.h"
   "quantization/moe_quantization.cc"
   "quantization/quantize_dequantize_linear.cc"
@@ -203,7 +203,7 @@ set(training_ops_excluded_files
   "nn/conv_grad.cc"
   "nn/conv_grad.h"
   "reduction/reduction_all.cc"  # deterministic = true, ignore ctx setting
-  # "reduction/reduction_ops.cc"  # Removing from exclusion - needed for kernel implementations
+  "reduction/reduction_ops.cc"  # Removing from exclusion - needed for kernel implementations
   "cuda_training_kernels.cc"
   "cuda_training_kernels.h"
   "nn/conv_shared.cc"
