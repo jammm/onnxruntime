@@ -14,7 +14,7 @@ void ROCMAllocator::CheckDevice(bool throw_when_fail) const {
   int current_device;
   auto hip_err = hipGetDevice(&current_device);
   if (hip_err == hipSuccess) {
-    ORT_ENFORCE(current_device == Info().id);
+    ORT_ENFORCE(current_device == Info().device.Id());
   } else if (throw_when_fail) {
     HIP_CALL_THROW(hip_err);
   }
@@ -51,8 +51,8 @@ void* ROCMAllocator::Alloc(size_t size) {
 
 void ROCMAllocator::Free(void* p) {
   SetDevice(false);
-  CheckDevice(false);                   // ignore ROCM failure when free
-  ORT_IGNORE_RETURN_VALUE(hipFree(p));  // do not throw error since it's OK for hipFree to fail during shutdown
+  CheckDevice(false);  // ignore ROCM failure when free
+  hipFree(p);          // do not throw error since it's OK for hipFree to fail during shutdown
 }
 
 void* ROCMExternalAllocator::Alloc(size_t size) {

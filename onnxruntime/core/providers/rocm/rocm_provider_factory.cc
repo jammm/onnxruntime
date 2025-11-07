@@ -79,8 +79,7 @@ struct ProviderInfo_ROCM_Impl final : ProviderInfo_ROCM {
   }
 
   std::unique_ptr<IAllocator> CreateROCMPinnedAllocator(int16_t device_id, const char* name) override {
-    ORT_UNUSED_PARAMETER(device_id);
-    return std::make_unique<ROCMPinnedAllocator>(name);
+    return std::make_unique<ROCMPinnedAllocator>(device_id, name);
   }
 
   std::unique_ptr<IDataTransfer> CreateGPUDataTransfer() override {

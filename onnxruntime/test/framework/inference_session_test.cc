@@ -1222,7 +1222,11 @@ TEST(InferenceSessionTests, TestBindCudaPreallocateOutputOnCpu2) {
 }
 #ifndef USE_WEBGPU
 TEST(InferenceSessionTests, TestBindCudaSpecifyOutputDeviceOnCuda) {
+#ifdef USE_CUDA
   OrtDevice device(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, OrtDevice::VendorIds::NVIDIA, 0);
+#elif USE_ROCM
+  OrtDevice device(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, OrtDevice::VendorIds::AMD, 0);
+#endif
 
   TestBindHelper("TestBindCudaPreallocateOutputOnCuda",
                  kGpuExecutionProvider,
@@ -2225,8 +2229,12 @@ TEST(InferenceSessionTests, TestArenaShrinkageAfterRun) {
   ASSERT_STATUS_OK(session_object.Initialize());
 
   // Fetch the CUDA allocator to analyze its stats
-  OrtMemoryInfo mem_info(CUDA, OrtArenaAllocator,
-                         OrtDevice(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, OrtDevice::VendorIds::NVIDIA, 0));
+#ifdef USE_CUDA
+  OrtDevice device(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, OrtDevice::VendorIds::NVIDIA, 0);
+#elif USE_ROCM
+  OrtDevice device(OrtDevice::GPU, OrtDevice::MemType::DEFAULT, OrtDevice::VendorIds::AMD, 0);
+#endif
+  OrtMemoryInfo mem_info(CUDA, OrtArenaAllocator, device);
   auto cuda_alloc = session_object.GetAllocator(mem_info);
 
   AllocatorStats alloc_stats;
