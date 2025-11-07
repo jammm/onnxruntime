@@ -17,7 +17,7 @@ namespace rocm {
 
 class MiopenConvolutionDescriptor final {
  public:
-  MiopenConvolutionDescriptor();
+  MiopenConvolutionDescriptor() : desc_(nullptr) {}
   ~MiopenConvolutionDescriptor();
 
   Status Set(size_t rank,
@@ -26,7 +26,8 @@ class MiopenConvolutionDescriptor final {
              const gsl::span<const int64_t>& dilations,
              int groups,
              miopenConvolutionMode_t mode,
-             miopenDataType_t data_type);
+             miopenDataType_t data_type,
+             bool use_tf32);
 
   operator miopenConvolutionDescriptor_t() const { return desc_; }
 
@@ -34,7 +35,17 @@ class MiopenConvolutionDescriptor final {
   miopenConvolutionDescriptor_t desc_;
 };
 
+template <typename T>
 struct vector_hash {
+  std::size_t operator()(const std::vector<T>& values) const {
+    std::size_t seed = values.size();
+    for (auto& val : values)
+      seed ^= std::hash<T>()(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    return seed;
+  }
+};
+
+struct tensor_shape_vector_hash {
   std::size_t operator()(const TensorShapeVector& values) const {
     std::size_t seed = values.size();
     for (auto& val : values)
@@ -148,8 +159,8 @@ struct MiopenConvState {
     decltype(AlgoPerfType().memory) memory;
   };
 
-  lru_unordered_map<TensorShapeVector, PerfFwdResultParams, vector_hash> cached_benchmark_fwd_results{MAX_CACHED_ALGO_PERF_RESULTS};
-  lru_unordered_map<TensorShapeVector, PerfBwdResultParams, vector_hash> cached_benchmark_bwd_results{MAX_CACHED_ALGO_PERF_RESULTS};
+  lru_unordered_map<TensorShapeVector, PerfFwdResultParams, tensor_shape_vector_hash> cached_benchmark_fwd_results{MAX_CACHED_ALGO_PERF_RESULTS};
+  lru_unordered_map<TensorShapeVector, PerfBwdResultParams, tensor_shape_vector_hash> cached_benchmark_bwd_results{MAX_CACHED_ALGO_PERF_RESULTS};
 
   // Some properties needed to support asymmetric padded Conv nodes
   bool post_slicing_required;
@@ -175,7 +186,7 @@ enum : size_t {
 
 // ONNX Conv operator uses NCHW format for input, weights and output.
 // NhwcConv contrib ops uses NHWC format: last dimension of input, weights and output are channels.
-template <typename T, bool NHWC>
+template <typename T, bool Layout>
 class Conv : public RocmKernel {
  public:
   using HipT = typename ToHipType<T>::MappedType;
@@ -183,7 +194,11 @@ class Conv : public RocmKernel {
   Conv(const OpKernelInfo& info) : RocmKernel(info), conv_attrs_(info) {
     auto pads_size = conv_attrs_.pads.size();
     ORT_ENFORCE(pads_size % 2 == 0);
+    is_nhwc_domain_ = info.node().Domain() == kMSInternalNHWCDomain;
   }
+
+  Status PrePack(const Tensor& tensor, int input_idx, AllocatorPtr alloc,
+                 bool& is_packed, PrePackedWeights* prepacked_weights) override;
 
   Status ComputeInternal(OpKernelContext* context) const override;
 
@@ -196,6 +211,10 @@ class Conv : public RocmKernel {
   ConvAttributes conv_attrs_;
   mutable MiopenConvState<miopenConvAlgoPerf_t> s_;
   constexpr static auto kDefaultConvAlgo = miopenConvolutionFwdAlgoGEMM;
+  std::unique_ptr<Tensor> W_;
+  bool is_nhwc_domain_;         // prepack is only needed for the Conv in kMSInternalNHWCDomain
+  bool is_fused_node_ = false;  // ensures the node is fused although the session option is not set
+  bool W_already_nhwc = false;  // In case NHWC == true and Conv is not in kMSInternalNHWCDomain
   static const miopenConvFwdAlgorithm_t kAllAlgos[];
 };
 

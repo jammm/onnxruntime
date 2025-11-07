@@ -5,36 +5,134 @@
 #include "core/common/span_utils.h"
 #include "core/providers/rocm/nn/conv_impl.h"
 #include "core/providers/rocm/rocm_common.h"
+#include "core/providers/rocm/rocm_execution_provider.h"
 #include "core/providers/rocm/shared_inc/fpgeneric.h"
 #include "core/providers/rocm/tensor/slice.h"
+#include "core/providers/rocm/tensor/transpose.h"
 
 namespace onnxruntime {
 namespace rocm {
 
+MiopenConvolutionDescriptor::~MiopenConvolutionDescriptor() {
+  if (desc_ != nullptr) {
+    miopenDestroyConvolutionDescriptor(desc_);
+    desc_ = nullptr;
+  }
+}
+
+Status MiopenConvolutionDescriptor::Set(size_t rank,
+                                        const gsl::span<const int64_t>& pads,
+                                        const gsl::span<const int64_t>& strides,
+                                        const gsl::span<const int64_t>& dilations,
+                                        int groups,
+                                        miopenConvolutionMode_t mode,
+                                        miopenDataType_t data_type,
+                                        bool use_tf32) {
+  if (!desc_) MIOPEN_RETURN_IF_ERROR(miopenCreateConvolutionDescriptor(&desc_));
+
+  std::vector<int> pad_vec(rank);
+  std::vector<int> stride_vec(rank);
+  std::vector<int> dilation_vec(rank);
+  for (size_t i = 0; i < rank; i++) {
+    pad_vec[i] = gsl::narrow_cast<int>(pads[i]);
+    stride_vec[i] = gsl::narrow_cast<int>(strides[i]);
+    dilation_vec[i] = gsl::narrow_cast<int>(dilations[i]);
+  }
+
+  MIOPEN_RETURN_IF_ERROR(miopenInitConvolutionNdDescriptor(
+      desc_, static_cast<int>(rank), pad_vec.data(), stride_vec.data(), dilation_vec.data(), mode));
+  MIOPEN_RETURN_IF_ERROR(miopenSetConvolutionGroupCount(desc_, groups));
+
+  // Note: MIOpen doesn't have the same TF32 control as cuDNN
+  ORT_UNUSED_PARAMETER(data_type);
+  ORT_UNUSED_PARAMETER(use_tf32);
+
+  return Status::OK();
+}
+
 // Op Set 11 for Conv only update document to clearify default dilations and strides value.
 // which are already convered by op set 11 cpu version, so simply add declaration.
-#define REGISTER_KERNEL_TYPED(T)                                                           \
+#define REGISTER_KERNEL_TYPED(T, DOMAIN, NHWC)                                             \
   ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(                                                 \
       Conv,                                                                                \
-      kOnnxDomain,                                                                         \
+      DOMAIN,                                                                              \
       1, 10,                                                                               \
       T,                                                                                   \
       kRocmExecutionProvider,                                                              \
       (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
-      Conv<T, false>);                                                                     \
-  ONNX_OPERATOR_TYPED_KERNEL_EX(                                                           \
+      Conv<T, NHWC>);                                                                      \
+  ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(                                                 \
       Conv,                                                                                \
-      kOnnxDomain,                                                                         \
-      11,                                                                                  \
+      DOMAIN,                                                                              \
+      11, 21,                                                                              \
       T,                                                                                   \
       kRocmExecutionProvider,                                                              \
       (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
-      Conv<T, false>);
+      Conv<T, NHWC>);                                                                      \
+  ONNX_OPERATOR_TYPED_KERNEL_EX(                                                           \
+      Conv,                                                                                \
+      DOMAIN,                                                                              \
+      22,                                                                                  \
+      T,                                                                                   \
+      kRocmExecutionProvider,                                                              \
+      (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
+      Conv<T, NHWC>);
 
-REGISTER_KERNEL_TYPED(float)
-// not yet supported in MIOpen
-// REGISTER_KERNEL_TYPED(double)
-REGISTER_KERNEL_TYPED(MLFloat16)
+REGISTER_KERNEL_TYPED(float, kOnnxDomain, false)
+REGISTER_KERNEL_TYPED(double, kOnnxDomain, false)
+REGISTER_KERNEL_TYPED(MLFloat16, kOnnxDomain, false)
+REGISTER_KERNEL_TYPED(BFloat16, kOnnxDomain, false)
+
+#ifdef ENABLE_ROCM_NHWC_OPS
+REGISTER_KERNEL_TYPED(float, kMSInternalNHWCDomain, true)
+REGISTER_KERNEL_TYPED(MLFloat16, kMSInternalNHWCDomain, true)
+#endif
+
+// First input (in this case X) is in case NHWC == true also in NHWC format, the other inputs in NCHW
+template <typename T, bool NHWC>
+Status Conv<T, NHWC>::PrePack(const Tensor& tensor, int input_idx, AllocatorPtr alloc,
+                              bool& is_packed, PrePackedWeights* prepacked_weights) {
+  is_packed = false;
+  // only layout of weight input is adjusted via PrePack
+  if constexpr (NHWC) {
+    if (is_nhwc_domain_ && input_idx == 1) {  // InputTensors::IN_W
+      // Transpose from {M, C/group, kH, kW} to {M, kH, kW, C/group}
+      auto orig_shape = tensor.Shape();
+      auto shape_size = orig_shape.GetDims().size();
+
+      InlinedVector<size_t, 5> perm;
+      perm.push_back(0);
+      for (size_t i = 2; i < shape_size; i++) perm.push_back(i);
+      perm.push_back(1);
+      gsl::span<size_t> permutation(perm.data(), shape_size);
+
+      TensorShapeVector nhwc_dims;
+      for (size_t i = 0; i < shape_size; i++) {
+        nhwc_dims.push_back(orig_shape[perm[i]]);
+      }
+
+      W_ = Tensor::Create(tensor.DataType(), TensorShape(nhwc_dims), std::move(alloc));
+
+      auto status = rocm::Transpose::DoTranspose(GetDeviceProp(),
+                                                 DefaultHipStream(),
+                                                 DefaultHipblasHandle(),
+                                                 permutation, tensor, *W_);
+      if (!status.IsOK()) {
+        return status;
+      }
+      HIP_CALL_THROW(hipStreamSynchronize(DefaultHipStream()));
+      is_packed = true;
+    } else {
+      W_already_nhwc = true;
+    }
+  } else {
+    ORT_UNUSED_PARAMETER(tensor);
+    ORT_UNUSED_PARAMETER(input_idx);
+    ORT_UNUSED_PARAMETER(alloc);
+    ORT_UNUSED_PARAMETER(prepacked_weights);
+  }
+  return Status::OK();
+}
 
 template <typename T, bool NHWC>
 const miopenConvFwdAlgorithm_t Conv<T, NHWC>::kAllAlgos[] = {
@@ -254,9 +352,11 @@ Status Conv<T, NHWC>::UpdateState(OpKernelContext* context, bool bias_expected) 
       ORT_RETURN_IF_ERROR(s_.y_tensor.Set(y_dims_miopen, MiopenTensor::GetDataType<HipT>()));
     }
 
+    const ROCMExecutionProvider* rocm_ep = static_cast<const ROCMExecutionProvider*>(this->Info().GetExecutionProvider());
     ORT_RETURN_IF_ERROR(s_.conv_desc.Set(kernel_shape.size(), pads, strides, dilations,
                                          gsl::narrow_cast<int>(conv_attrs_.group),
-                                         miopenConvolution, MiopenTensor::GetDataType<HipT>()));
+                                         miopenConvolution, MiopenTensor::GetDataType<HipT>(),
+                                         rocm_ep->UseTF32()));
 
     if (context->InputCount() >= 3) {
       const Tensor* B = context->Input<Tensor>(2);
@@ -281,7 +381,6 @@ Status Conv<T, NHWC>::UpdateState(OpKernelContext* context, bool bias_expected) 
     if (!s_.cached_benchmark_fwd_results.contains(x_dims_miopen)) {
       miopenConvAlgoPerf_t perf;
       int algo_count = 1;
-      const ROCMExecutionProvider* rocm_ep = static_cast<const ROCMExecutionProvider*>(this->Info().GetExecutionProvider());
       static constexpr int num_algos = MIOPEN_CONVOLUTION_FWD_ALGO_COUNT;
       size_t max_ws_size = rocm_ep->GetMiopenConvUseMaxWorkspace() ? GetMaxWorkspaceSize(GetMiopenHandle(context), s_, kAllAlgos, num_algos, rocm_ep->GetDeviceId())
                                                                    : AlgoSearchWorkspaceSize;
@@ -370,48 +469,6 @@ Status Conv<T, NHWC>::ComputeInternal(OpKernelContext* context) const {
   return Status::OK();
 }
 
-MiopenConvolutionDescriptor::MiopenConvolutionDescriptor() : desc_(nullptr) {
-}
-
-MiopenConvolutionDescriptor::~MiopenConvolutionDescriptor() {
-  if (desc_ != nullptr) {
-    miopenDestroyConvolutionDescriptor(desc_);
-    desc_ = nullptr;
-  }
-}
-
-Status MiopenConvolutionDescriptor::Set(
-    size_t rank,
-    const gsl::span<const int64_t>& pads,
-    const gsl::span<const int64_t>& strides,
-    const gsl::span<const int64_t>& dilations,
-    int groups,
-    miopenConvolutionMode_t mode,
-    miopenDataType_t data_type) {
-  if (!desc_)
-    MIOPEN_RETURN_IF_ERROR(miopenCreateConvolutionDescriptor(&desc_));
-
-  InlinedVector<int, kTensorShapeSmallBufferElementsSize> pad_dims(rank);
-  InlinedVector<int, kTensorShapeSmallBufferElementsSize> stride_dims(rank);
-  InlinedVector<int, kTensorShapeSmallBufferElementsSize> dilation_dims(rank);
-  for (size_t i = 0; i < rank; i++) {
-    pad_dims[i] = gsl::narrow_cast<int>(pads[i]);
-    stride_dims[i] = gsl::narrow_cast<int>(strides[i]);
-    dilation_dims[i] = gsl::narrow_cast<int>(dilations[i]);
-  }
-
-  MIOPEN_RETURN_IF_ERROR(miopenInitConvolutionNdDescriptor(
-      desc_,
-      gsl::narrow_cast<int>(rank),
-      pad_dims.data(),
-      stride_dims.data(),
-      dilation_dims.data(),
-      mode));
-
-  MIOPEN_RETURN_IF_ERROR(miopenSetConvolutionGroupCount(desc_, groups));
-
-  return Status::OK();
-}
 
 #ifndef DISABLE_CONTRIB_OPS
 // template instantiation for NhwcConv

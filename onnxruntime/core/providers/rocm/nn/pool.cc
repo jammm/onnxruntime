@@ -1,103 +1,118 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "core/providers/rocm/miopen_common.h"
+#include "core/providers/shared_library/provider_api.h"
 #include "core/providers/rocm/nn/pool.h"
+#include "core/providers/rocm/miopen_common.h"
 #include "core/providers/rocm/nn/max_pool_with_index.h"
 #include "core/providers/rocm/math/unary_elementwise_ops_impl.h"
-#include "core/providers/rocm/reduction/reduction_ops.h"
 
 using namespace onnxruntime::common;
 namespace onnxruntime {
 namespace rocm {
 
-#define POOLING_KERNEL_(op_name, data_type, pool, pool_type, since_version)                        \
+#define POOLING_KERNEL(op_name, data_type, pool_type, since_version, op_domain, nhwc)              \
   ONNX_OPERATOR_TYPED_KERNEL_EX(                                                                   \
-      op_name,                                                                                     \
-      kOnnxDomain,                                                                                 \
-      since_version,                                                                               \
-      data_type,                                                                                   \
-      kRocmExecutionProvider,                                                                      \
+      op_name, op_domain, since_version, data_type, kRocmExecutionProvider,                        \
       (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<data_type>()), \
-      pool<data_type, pool_type>);
+      Pool<data_type, pool_type, nhwc>);
 
-#define POOLING_KERNEL(op_name, data_type, pool_type, since_version) \
-  POOLING_KERNEL_(op_name, data_type, Pool, pool_type, since_version)
+#define POOLING_KERNEL_VERSIONED(op_name, data_type, pool_type, since_version, end_version, op_domain, nhwc) \
+  ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(                                                                   \
+      op_name, op_domain, since_version, end_version, data_type, kRocmExecutionProvider,                     \
+      (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<data_type>()),           \
+      Pool<data_type, pool_type, nhwc>);
 
-#define GLOBAL_POOLING_KERNEL(op_name, data_type, pool_type, since_version) \
-  POOLING_KERNEL_(op_name, data_type, GlobalPool, pool_type, since_version)
+#define POOLING_KERNEL_WITH_INDICES(op_name, data_type, pool_type, since_version, op_domain, nhwc)    \
+  ONNX_OPERATOR_TYPED_KERNEL_EX(op_name, op_domain, since_version, data_type, kRocmExecutionProvider, \
+                                (*KernelDefBuilder::Create())                                         \
+                                    .TypeConstraint("T", DataTypeImpl::GetTensorType<data_type>())    \
+                                    .TypeConstraint("I", DataTypeImpl::GetTensorType<int64_t>()),     \
+                                Pool<data_type, pool_type, nhwc>);
 
-#define POOLING_KERNEL_VERSIONED(op_name, data_type, pool_type, since_version, end_version) \
-  ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(                                                  \
-      op_name,                                                                              \
-      kOnnxDomain,                                                                          \
-      since_version,                                                                        \
-      end_version,                                                                          \
-      data_type,                                                                            \
-      kRocmExecutionProvider,                                                               \
-      (*KernelDefBuilder::Create())                                                         \
-          .TypeConstraint("T", DataTypeImpl::GetTensorType<data_type>()),                   \
-      Pool<data_type, pool_type>);
+#define POOLING_KERNEL_VERSIONED_WITH_INDICES(op_name, data_type, pool_type, since_version, end_version, op_domain, \
+                                              nhwc)                                                                 \
+  ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(op_name, op_domain, since_version, end_version, data_type,                \
+                                          kRocmExecutionProvider,                                                   \
+                                          (*KernelDefBuilder::Create())                                             \
+                                              .TypeConstraint("T", DataTypeImpl::GetTensorType<data_type>())        \
+                                              .TypeConstraint("I", DataTypeImpl::GetTensorType<int64_t>()),         \
+                                          Pool<data_type, pool_type, nhwc>);
 
-#define POOLING_KERNEL_WITH_INDICES(op_name, data_type, pool_type, since_version) \
-  ONNX_OPERATOR_TYPED_KERNEL_EX(                                                  \
-      op_name,                                                                    \
-      kOnnxDomain,                                                                \
-      since_version,                                                              \
-      data_type,                                                                  \
-      kRocmExecutionProvider,                                                     \
-      (*KernelDefBuilder::Create())                                               \
-          .TypeConstraint("T", DataTypeImpl::GetTensorType<data_type>())          \
-          .TypeConstraint("I", DataTypeImpl::GetTensorType<int64_t>()),           \
-      Pool<data_type, pool_type>);
-
-#define POOLING_KERNEL_VERSIONED_WITH_INDICES(op_name, data_type, pool_type, since_version, end_version) \
-  ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(                                                               \
-      op_name,                                                                                           \
-      kOnnxDomain,                                                                                       \
-      since_version,                                                                                     \
-      end_version,                                                                                       \
-      data_type,                                                                                         \
-      kRocmExecutionProvider,                                                                            \
-      (*KernelDefBuilder::Create())                                                                      \
-          .TypeConstraint("T", DataTypeImpl::GetTensorType<data_type>())                                 \
-          .TypeConstraint("I", DataTypeImpl::GetTensorType<int64_t>()),                                  \
-      Pool<data_type, pool_type>);
-
-POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 7, 9)
-POOLING_KERNEL_VERSIONED(AveragePool, double, AveragePool, 7, 9)
-POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 7, 9)
-POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 10, 10)
-POOLING_KERNEL_VERSIONED(AveragePool, double, AveragePool, 10, 10)
-POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 10, 10)
+POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 7, 9, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, double, AveragePool, 7, 9, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 7, 9, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 10, 10, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, double, AveragePool, 10, 10, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 10, 10, kOnnxDomain, false)
 // AveragePool and MaxPool op set 11 only update spec document on default value for dilations and strides.
-POOLING_KERNEL(AveragePool, float, AveragePool, 11)
-POOLING_KERNEL(AveragePool, double, AveragePool, 11)
-POOLING_KERNEL(AveragePool, MLFloat16, AveragePool, 11)
-POOLING_KERNEL_VERSIONED(MaxPool, float, MaxPool<1>, 1, 7)
-POOLING_KERNEL_VERSIONED(MaxPool, double, MaxPool<1>, 1, 7)
-POOLING_KERNEL_VERSIONED(MaxPool, MLFloat16, MaxPool<1>, 1, 7)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 8, 9)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, double, MaxPool<8>, 8, 9)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 8, 9)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 10, 10)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, double, MaxPool<8>, 10, 10)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 10, 10)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 11, 11)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, double, MaxPool<8>, 11, 11)
-POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 11, 11)
-POOLING_KERNEL_WITH_INDICES(MaxPool, float, MaxPool<8>, 12)
-POOLING_KERNEL_WITH_INDICES(MaxPool, double, MaxPool<8>, 12)
-POOLING_KERNEL_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 12)
-POOLING_KERNEL_WITH_INDICES(MaxPool, int8_t, MaxPool<8>, 12)
-POOLING_KERNEL_WITH_INDICES(MaxPool, uint8_t, MaxPool<8>, 12)
+POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 11, 18, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, double, AveragePool, 11, 18, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 11, 18, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 19, 21, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, double, AveragePool, 19, 21, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 19, 21, kOnnxDomain, false)
+POOLING_KERNEL(AveragePool, float, AveragePool, 22, kOnnxDomain, false)
+POOLING_KERNEL(AveragePool, double, AveragePool, 22, kOnnxDomain, false)
+POOLING_KERNEL(AveragePool, MLFloat16, AveragePool, 22, kOnnxDomain, false)
+POOLING_KERNEL(AveragePool, BFloat16, AveragePool, 22, kOnnxDomain, false)
+POOLING_KERNEL(GlobalAveragePool, float, AveragePool, 1, kOnnxDomain, false)
+POOLING_KERNEL(GlobalAveragePool, double, AveragePool, 1, kOnnxDomain, false)
+POOLING_KERNEL(GlobalAveragePool, MLFloat16, AveragePool, 1, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(MaxPool, float, MaxPool<1>, 1, 7, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(MaxPool, double, MaxPool<1>, 1, 7, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED(MaxPool, MLFloat16, MaxPool<1>, 1, 7, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 8, 9, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, double, MaxPool<8>, 8, 9, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 8, 9, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 10, 10, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, double, MaxPool<8>, 10, 10, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 10, 10, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 11, 11, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, double, MaxPool<8>, 11, 11, kOnnxDomain, false)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 11, 11, kOnnxDomain, false)
+POOLING_KERNEL_WITH_INDICES(MaxPool, float, MaxPool<8>, 12, kOnnxDomain, false)
+POOLING_KERNEL_WITH_INDICES(MaxPool, double, MaxPool<8>, 12, kOnnxDomain, false)
+POOLING_KERNEL_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 12, kOnnxDomain, false)
+POOLING_KERNEL_WITH_INDICES(MaxPool, int8_t, MaxPool<8>, 12, kOnnxDomain, false)
+POOLING_KERNEL_WITH_INDICES(MaxPool, uint8_t, MaxPool<8>, 12, kOnnxDomain, false)
 
-GLOBAL_POOLING_KERNEL(GlobalAveragePool, float, AveragePool, 1)
-GLOBAL_POOLING_KERNEL(GlobalAveragePool, double, AveragePool, 1)
-GLOBAL_POOLING_KERNEL(GlobalAveragePool, MLFloat16, AveragePool, 1)
-GLOBAL_POOLING_KERNEL(GlobalMaxPool, float, MaxPool<1>, 1)
-GLOBAL_POOLING_KERNEL(GlobalMaxPool, double, MaxPool<1>, 1)
-GLOBAL_POOLING_KERNEL(GlobalMaxPool, MLFloat16, MaxPool<1>, 1)
+POOLING_KERNEL(GlobalMaxPool, float, MaxPool<1>, 1, kOnnxDomain, false)
+POOLING_KERNEL(GlobalMaxPool, double, MaxPool<1>, 1, kOnnxDomain, false)
+POOLING_KERNEL(GlobalMaxPool, MLFloat16, MaxPool<1>, 1, kOnnxDomain, false)
+
+// NHWC variants
+#ifdef ENABLE_ROCM_NHWC_OPS
+POOLING_KERNEL_VERSIONED(MaxPool, float, MaxPool<1>, 1, 7, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED(MaxPool, MLFloat16, MaxPool<1>, 1, 7, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 8, 9, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 8, 9, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 10, 10, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 10, 10, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, float, MaxPool<8>, 11, 11, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 11, 11, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_WITH_INDICES(MaxPool, float, MaxPool<8>, 12, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_WITH_INDICES(MaxPool, MLFloat16, MaxPool<8>, 12, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_WITH_INDICES(MaxPool, int8_t, MaxPool<8>, 12, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_WITH_INDICES(MaxPool, uint8_t, MaxPool<8>, 12, kMSInternalNHWCDomain, true)
+
+POOLING_KERNEL(GlobalMaxPool, float, MaxPool<1>, 1, kMSInternalNHWCDomain, true)
+POOLING_KERNEL(GlobalMaxPool, MLFloat16, MaxPool<1>, 1, kMSInternalNHWCDomain, true)
+
+POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 7, 9, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 7, 9, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 10, 10, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 10, 10, kMSInternalNHWCDomain, true)
+// AveragePool and MaxPool op set 11 only update spec document on default value for dilations
+POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 11, 18, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 11, 18, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED(AveragePool, float, AveragePool, 19, 21, kMSInternalNHWCDomain, true)
+POOLING_KERNEL_VERSIONED(AveragePool, MLFloat16, AveragePool, 19, 21, kMSInternalNHWCDomain, true)
+POOLING_KERNEL(AveragePool, float, AveragePool, 22, kMSInternalNHWCDomain, true)
+POOLING_KERNEL(AveragePool, MLFloat16, AveragePool, 22, kMSInternalNHWCDomain, true)
+POOLING_KERNEL(GlobalAveragePool, float, AveragePool, 1, kMSInternalNHWCDomain, true)
+POOLING_KERNEL(GlobalAveragePool, MLFloat16, AveragePool, 1, kMSInternalNHWCDomain, true)
+#endif
 
 class MiopenPoolingDescriptor final {
  public:
@@ -152,8 +167,8 @@ class MiopenPoolingDescriptor final {
   miopenPoolingDescriptor_t desc_;
 };
 
-template <typename T, typename PoolType>
-Status Pool<T, PoolType>::ComputeInternal(OpKernelContext* context) const {
+template <typename T, typename PoolType, bool Layout>
+Status Pool<T, PoolType, Layout>::ComputeInternal(OpKernelContext* context) const {
   typedef typename ToHipType<T>::MappedType HipT;
   const Tensor* X = context->Input<Tensor>(0);
   const TensorShape& x_shape = X->Shape();
@@ -164,11 +179,21 @@ Status Pool<T, PoolType>::ComputeInternal(OpKernelContext* context) const {
   }
 
   auto kernel_shape = pool_attrs_.kernel_shape;
-  auto pads = pool_attrs_.pads;
   auto strides = pool_attrs_.strides;
-  ORT_ENFORCE(!this->pool_attrs_.global_pooling);
+  TensorShapeVector pads = pool_attrs_.pads;
 
-  auto y_dims = pool_attrs_.SetOutputSize(x_shape, x_shape[1], &pads);
+  if (pool_attrs_.global_pooling) {
+    if constexpr (Layout == LAYOUT_NCHW) {
+      kernel_shape.assign(x_dims.begin() + 2, x_dims.end());
+    } else if constexpr (Layout == LAYOUT_NHWC) {
+      kernel_shape.assign(x_dims.begin() + 1, x_dims.end() - 1);
+    }
+    pads.assign(2 * kernel_shape.size(), 0);
+    strides.assign(kernel_shape.size(), 1);
+  }
+  auto out_channel = (Layout == LAYOUT_NHWC) ? x_shape[x_dims.size() - 1] : x_shape[1];
+
+  auto y_dims = pool_attrs_.SetOutputSize(x_shape, out_channel, &pads, Layout == LAYOUT_NHWC);
   TensorShape y_shape(y_dims);
   Tensor* Y = context->Output(0, y_shape);
   // special case when there is a dim value of 0 in the shape.
@@ -182,12 +207,21 @@ Status Pool<T, PoolType>::ComputeInternal(OpKernelContext* context) const {
   TensorShapeVector y_dims_miopen(y_dims);
   if (kernel_shape.size() < 2) {
     // miopen only takes 4D or 5D input, so pad dimensions if needed
-    x_dims_miopen.push_back(1);
-    y_dims_miopen.push_back(1);
-    pads.insert(pads.begin() + kernel_shape.size(), 0);
-    pads.insert(pads.end(), 0);
-    kernel_shape.push_back(1);
-    strides.push_back(1);
+    if constexpr (Layout == LAYOUT_NHWC) {
+      x_dims_miopen.insert(x_dims_miopen.end() - 1, 1);
+      y_dims_miopen.insert(y_dims_miopen.end() - 1, 1);
+      pads.insert(pads.begin() + pads.size() / 2, 0);
+      pads.insert(pads.end(), 0);
+      kernel_shape.insert(kernel_shape.end(), 1);
+      strides.insert(strides.end(), 1);
+    } else {  // Layout == LAYOUT_NCHW
+      x_dims_miopen.insert(x_dims_miopen.end(), 1);
+      y_dims_miopen.insert(y_dims_miopen.end(), 1);
+      pads.insert(pads.begin() + pads.size() / 2, 0);
+      pads.insert(pads.end(), 0);
+      kernel_shape.insert(kernel_shape.end(), 1);
+      strides.insert(strides.end(), 1);
+    }
   }
 
   miopenPoolingMode_t mode = miopenPoolingMax;
@@ -204,8 +238,8 @@ Status Pool<T, PoolType>::ComputeInternal(OpKernelContext* context) const {
     const auto beta = Consts<float>::Zero;
     MiopenTensor x_tensor;
     MiopenTensor y_tensor;
-    ORT_RETURN_IF_ERROR(x_tensor.Set(x_dims_miopen, MiopenTensor::GetDataType<float>()));
-    ORT_RETURN_IF_ERROR(y_tensor.Set(y_dims_miopen, MiopenTensor::GetDataType<float>()));
+    ORT_RETURN_IF_ERROR(x_tensor.Set(x_dims_miopen, MiopenTensor::GetDataType<float>(), Layout == LAYOUT_NHWC));
+    ORT_RETURN_IF_ERROR(y_tensor.Set(y_dims_miopen, MiopenTensor::GetDataType<float>(), Layout == LAYOUT_NHWC));
 
     const auto input_count = x_shape.Size();
     const auto output_count = y_shape.Size();
@@ -220,8 +254,8 @@ Status Pool<T, PoolType>::ComputeInternal(OpKernelContext* context) const {
     const auto beta = Consts<HipT>::Zero;
     MiopenTensor x_tensor;
     MiopenTensor y_tensor;
-    ORT_RETURN_IF_ERROR(x_tensor.Set(x_dims_miopen, MiopenTensor::GetDataType<HipT>()));
-    ORT_RETURN_IF_ERROR(y_tensor.Set(y_dims_miopen, MiopenTensor::GetDataType<HipT>()));
+    ORT_RETURN_IF_ERROR(x_tensor.Set(x_dims_miopen, MiopenTensor::GetDataType<HipT>(), Layout == LAYOUT_NHWC));
+    ORT_RETURN_IF_ERROR(y_tensor.Set(y_dims_miopen, MiopenTensor::GetDataType<HipT>(), Layout == LAYOUT_NHWC));
 
     MIOPEN_RETURN_IF_ERROR(PoolingForwardHelper(GetMiopenHandle(context), pooling_desc, &alpha, x_tensor, x_data, &beta, y_tensor, y_data));
   }
@@ -229,11 +263,12 @@ Status Pool<T, PoolType>::ComputeInternal(OpKernelContext* context) const {
   return Status::OK();
 }
 
-template <typename T>
-Status Pool<T, MaxPool<8>>::ComputeInternal(OpKernelContext* context) const {
+template <typename T, bool Layout>
+Status Pool<T, MaxPool<8>, Layout>::ComputeInternal(OpKernelContext* context) const {
   typedef typename ToHipType<T>::MappedType HipT;
   const Tensor* X = context->Input<Tensor>(0);
   const TensorShape& x_shape = X->Shape();
+  const auto& x_dims = x_shape.GetDims();
 
   if (x_shape.NumDimensions() < 3) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Input dimension cannot be less than 3.");
@@ -242,22 +277,39 @@ Status Pool<T, MaxPool<8>>::ComputeInternal(OpKernelContext* context) const {
   auto kernel_shape = this->pool_attrs_.kernel_shape;
   auto pads = this->pool_attrs_.pads;
   auto strides = this->pool_attrs_.strides;
-  ORT_ENFORCE(!this->pool_attrs_.global_pooling);
 
-  auto y_dims = this->pool_attrs_.SetOutputSize(x_shape, x_shape[1], &pads);
+  if (this->pool_attrs_.global_pooling) {
+    if constexpr (Layout == LAYOUT_NCHW) {
+      kernel_shape.assign(x_dims.begin() + 2, x_dims.end());
+    } else if constexpr (Layout == LAYOUT_NHWC) {
+      kernel_shape.assign(x_dims.begin() + 1, x_dims.end() - 1);
+    }
+    pads.assign(2 * kernel_shape.size(), 0);  // x{i}_begin + x{i}_end
+    strides.assign(kernel_shape.size(), 1);
+  }
+  auto out_channel = Layout == LAYOUT_NHWC ? x_shape[x_shape.NumDimensions() - 1] : x_shape[1];
+  auto y_dims = this->pool_attrs_.SetOutputSize(x_shape, out_channel, &pads, Layout == LAYOUT_NHWC);
   Tensor* Y = context->Output(0, TensorShape(y_dims));
 
   // special case when there is a dim value of 0 in the shape.
-  if (Y->Shape().Size() == 0)
-    return Status::OK();
+  if (Y->Shape().Size() == 0) return Status::OK();
 
   auto x_data = reinterpret_cast<const HipT*>(X->Data<T>());
   auto y_data = reinterpret_cast<HipT*>(Y->MutableData<T>());
 
-  Tensor* I = context->Output(1, TensorShape(y_dims));
+  // I is in NCHW format and the contained indices use NCHW math to compute the index
+  auto i_dims = y_dims;
+  if constexpr (Layout == LAYOUT_NHWC) {
+    // y_dims in NHWDC format, i_dims has to be in NCHWD format.
+    i_dims.insert(i_dims.begin() + 1, i_dims.back());  // N*C*HWDC
+    i_dims.pop_back();                                 // NCHW
+  }
+
+  Tensor* I = context->Output(1, TensorShape(i_dims));
+  constexpr bool pool_template_arg = Layout == LAYOUT_NHWC;
   if (nullptr != I || !this->pool_attrs_.default_dilations) {
     auto i_data = nullptr == I ? nullptr : I->MutableData<int64_t>();
-    MaxPoolWithIndex<HipT, false>(
+    MaxPoolWithIndex<HipT, pool_template_arg>(
         this->Stream(context),
         x_shape,
         TensorShape(y_dims),
@@ -270,74 +322,8 @@ Status Pool<T, MaxPool<8>>::ComputeInternal(OpKernelContext* context) const {
         y_data,
         i_data);
   } else {
-    ORT_RETURN_IF_ERROR((Pool<T, MaxPool<1>>::ComputeInternal(context)));
+    ORT_RETURN_IF_ERROR((Pool<T, MaxPool<1>, pool_template_arg>::ComputeInternal(context)));
   }
-  return Status::OK();
-}
-
-template <typename T, typename PoolType>
-Status GlobalPool<T, PoolType>::ComputeInternal(OpKernelContext* context) const {
-  using HipT = typename ToHipType<T>::MappedType;
-  const Tensor* X = context->Input<Tensor>(0);
-  const TensorShape& x_shape = X->Shape();
-
-  if (x_shape.NumDimensions() < 3) {
-    return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Input dimension cannot be less than 3.");
-  }
-
-  ORT_ENFORCE(this->pool_attrs_.global_pooling);
-
-  miopenReduceTensorOp_t reduce_op;
-  if constexpr (PoolType::type == onnxruntime::PoolType::kAveragePool) {
-    reduce_op = MIOPEN_REDUCE_TENSOR_AVG;
-  } else if (PoolType::type == onnxruntime::PoolType::kMaxPool) {
-    reduce_op = MIOPEN_REDUCE_TENSOR_MAX;
-  } else {
-    ORT_NOT_IMPLEMENTED();
-  }
-
-  miopenDataType_t miopen_type_X = MiopenTensor::GetDataType<HipT>();
-
-  MiopenReduceDescriptor reduce_desc;
-  if constexpr (std::is_same<T, MLFloat16>::value) {
-    ORT_RETURN_IF_ERROR(reduce_desc.Set(
-        reduce_op, MiopenTensor::GetDataType<float>(), MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES));
-  } else {
-    ORT_RETURN_IF_ERROR(reduce_desc.Set(reduce_op, miopen_type_X, MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES));
-  }
-
-  auto x_dims = x_shape.AsShapeVector();
-  TensorShapeVector y_dims;
-  y_dims.resize(x_dims.size(), 1);
-  y_dims[0] = x_dims[0];
-  y_dims[1] = x_dims[1];
-
-  Tensor* Y = context->Output(0, y_dims);
-
-  MiopenTensor input_tensor;
-  MiopenTensor output_tensor;
-  ORT_RETURN_IF_ERROR(input_tensor.Set(x_dims, miopen_type_X));
-  ORT_RETURN_IF_ERROR(output_tensor.Set(y_dims, miopen_type_X));
-
-  auto miopen_handle = this->GetMiopenHandle(context);
-  size_t workspace_bytes{};
-  MIOPEN_RETURN_IF_ERROR(miopenGetReductionWorkspaceSize(
-      miopen_handle, reduce_desc, input_tensor, output_tensor, &workspace_bytes));
-  auto workspace_buffer = RocmKernel::GetScratchBuffer<void>(workspace_bytes, context->GetComputeStream());
-
-  size_t indices_bytes{};
-  MIOPEN_RETURN_IF_ERROR(miopenGetReductionIndicesSize(
-      miopen_handle, reduce_desc, input_tensor, output_tensor, &indices_bytes));
-  auto indices_buffer = RocmKernel::GetScratchBuffer<void>(indices_bytes, context->GetComputeStream());
-
-  const auto one = ReduceConsts<HipT>::One;
-  const auto zero = ReduceConsts<HipT>::Zero;
-
-  MIOPEN_RETURN_IF_ERROR(miopenReduceTensor(
-      miopen_handle, reduce_desc, indices_buffer.get(), indices_bytes, workspace_buffer.get(), workspace_bytes,
-      &one, input_tensor, reinterpret_cast<const HipT*>(X->DataRaw()),
-      &zero, output_tensor, reinterpret_cast<HipT*>(Y->MutableDataRaw())));
-
   return Status::OK();
 }
 

@@ -10,7 +10,7 @@
 namespace onnxruntime {
 namespace rocm {
 
-template <typename T, typename PoolType>
+template <typename T, typename PoolType, bool NHWC>
 class Pool : public RocmKernel, public PoolBase {
  public:
   Pool(const OpKernelInfo& info) : RocmKernel(info), PoolBase(info) {}
@@ -18,21 +18,14 @@ class Pool : public RocmKernel, public PoolBase {
   Status ComputeInternal(OpKernelContext* context) const override;
 };
 
-template <typename T>
-class Pool<T, MaxPool<8>> final : public Pool<T, MaxPool<1>> {
+template <typename T, bool Layout>
+class Pool<T, MaxPool<8>, Layout> final : public Pool<T, MaxPool<1>, Layout> {
  public:
-  Pool(const OpKernelInfo& info) : Pool<T, MaxPool<1>>(info) {}
+  explicit Pool(const OpKernelInfo& info) : Pool<T, MaxPool<1>, Layout>(info) {}
 
   Status ComputeInternal(OpKernelContext* context) const override;
 };
 
-template <typename T, typename PoolType>
-class GlobalPool final : public Pool<T, PoolType> {
- public:
-  GlobalPool(const OpKernelInfo& info) : Pool<T, PoolType>(info) {}
-
-  Status ComputeInternal(OpKernelContext* context) const override;
-};
 
 }  // namespace rocm
 }  // namespace onnxruntime
