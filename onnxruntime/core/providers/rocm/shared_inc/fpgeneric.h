@@ -5,6 +5,7 @@
 
 #include "core/providers/rocm/backward_guard.h"
 #include "core/providers/rocm/rocm_common.h"
+#include <hip/hip_bf16.h>
 
 #define ORT_ROCBLAS_VERSION_DECIMAL (ROCBLAS_VERSION_MAJOR * 100 + ROCBLAS_VERSION_MINOR)
 #if ORT_ROCBLAS_VERSION_DECIMAL >= 242
@@ -68,7 +69,9 @@ inline hipblasStatus_t hipblasGemmHelper(hipblasHandle_t handle,
                                          const float* A, int lda,
                                          const float* B, int ldb,
                                          const float* beta,
-                                         float* C, int ldc) {
+                                         float* C, int ldc,
+                                         const hipDeviceProp_t& /*prop*/,
+                                         bool /*use_tf32*/) {
   return hipblasGemmEx(handle,
                        transa,
                        transb,
@@ -90,7 +93,9 @@ inline hipblasStatus_t hipblasGemmHelper(hipblasHandle_t handle,
                                          const double* A, int lda,
                                          const double* B, int ldb,
                                          const double* beta,
-                                         double* C, int ldc) {
+                                         double* C, int ldc,
+                                         const hipDeviceProp_t& /*prop*/,
+                                         bool /*use_tf32*/) {
   return hipblasDgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
 }
 
@@ -102,7 +107,9 @@ inline hipblasStatus_t hipblasGemmHelper(hipblasHandle_t handle,
                                          const half* A, int lda,
                                          const half* B, int ldb,
                                          const half* beta,
-                                         half* C, int ldc) {
+                                         half* C, int ldc,
+                                         const hipDeviceProp_t& /*prop*/,
+                                         bool /*use_tf32*/) {
   float h_a = onnxruntime::math::halfToFloat(*reinterpret_cast<const uint16_t*>(alpha));
   float h_b = onnxruntime::math::halfToFloat(*reinterpret_cast<const uint16_t*>(beta));
   return rocBLASStatusToHIPStatus(rocblas_gemm_ex((rocblas_handle)handle,
@@ -127,7 +134,9 @@ inline hipblasStatus_t hipblasGemmHelper(hipblasHandle_t handle,
                                          const half* A, int lda,
                                          const half* B, int ldb,
                                          const float* beta,
-                                         half* C, int ldc) {
+                                         half* C, int ldc,
+                                         const hipDeviceProp_t& /*prop*/,
+                                         bool /*use_tf32*/) {
   return rocBLASStatusToHIPStatus(rocblas_gemm_ex((rocblas_handle)handle,
                                                   hipOperationToRocOperation(transa),
                                                   hipOperationToRocOperation(transb),
@@ -142,26 +151,50 @@ inline hipblasStatus_t hipblasGemmHelper(hipblasHandle_t handle,
                                                   rocblas_gemm_algo_standard, 0, get_flag()));
 }
 
-inline hipblasStatus_t hipblasGemmHelper(hipblasHandle_t handle,
-                                         hipblasOperation_t transa,
-                                         hipblasOperation_t transb,
-                                         int m, int n, int k,
-                                         const float* alpha,
-                                         const half* A, int lda,
-                                         const half* B, int ldb,
-                                         const float* beta,
-                                         half* C, int ldc,
-                                         const hipDeviceProp_t&,
-                                         bool /*use_tf32*/) {
-  return hipblasGemmHelper(handle,
-                           transa,
-                           transb,
-                           m, n, k,
-                           alpha,
-                           A, lda,
-                           B, ldb,
-                           beta,
-                           C, ldc);
+inline hipblasStatus_t hipblasGemmHelper(
+    hipblasHandle_t handle, hipblasOperation_t transa, hipblasOperation_t transb, int m,
+    int n, int k, const onnxruntime::BFloat16* alpha, const onnxruntime::BFloat16* A, int lda,
+    const onnxruntime::BFloat16* B, int ldb, const onnxruntime::BFloat16* beta, onnxruntime::BFloat16* C, int ldc,
+    const hipDeviceProp_t& /*prop*/, bool /*use_tf32*/) {
+  float h_a = alpha->ToFloat();
+  float h_b = beta->ToFloat();
+
+  // accumulating in FP32
+  return rocBLASStatusToHIPStatus(rocblas_gemm_ex((rocblas_handle)handle,
+                                                  hipOperationToRocOperation(transa),
+                                                  hipOperationToRocOperation(transb),
+                                                  m, n, k,
+                                                  &h_a,
+                                                  A, rocblas_datatype_bf16_r, lda,
+                                                  B, rocblas_datatype_bf16_r, ldb,
+                                                  &h_b,
+                                                  C, rocblas_datatype_bf16_r, ldc,
+                                                  C, rocblas_datatype_bf16_r, ldc,
+                                                  rocblas_datatype_f32_r,
+                                                  rocblas_gemm_algo_standard, 0, get_flag()));
+}
+
+inline hipblasStatus_t hipblasGemmHelper(
+    hipblasHandle_t handle, hipblasOperation_t transa, hipblasOperation_t transb, int m,
+    int n, int k, const __hip_bfloat16* alpha, const __hip_bfloat16* A, int lda,
+    const __hip_bfloat16* B, int ldb, const __hip_bfloat16* beta, __hip_bfloat16* C, int ldc,
+    const hipDeviceProp_t& /*prop*/, bool /*use_tf32*/) {
+  float h_a = __bfloat162float(*alpha);
+  float h_b = __bfloat162float(*beta);
+
+  // accumulating in FP32
+  return rocBLASStatusToHIPStatus(rocblas_gemm_ex((rocblas_handle)handle,
+                                                  hipOperationToRocOperation(transa),
+                                                  hipOperationToRocOperation(transb),
+                                                  m, n, k,
+                                                  &h_a,
+                                                  A, rocblas_datatype_bf16_r, lda,
+                                                  B, rocblas_datatype_bf16_r, ldb,
+                                                  &h_b,
+                                                  C, rocblas_datatype_bf16_r, ldc,
+                                                  C, rocblas_datatype_bf16_r, ldc,
+                                                  rocblas_datatype_f32_r,
+                                                  rocblas_gemm_algo_standard, 0, get_flag()));
 }
 
 inline hipblasStatus_t hipblasGemmHelper(hipblasHandle_t handle,

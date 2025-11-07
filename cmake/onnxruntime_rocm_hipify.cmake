@@ -61,13 +61,10 @@ set(contrib_ops_excluded_files
   "quantization/attention_quantization_impl.cuh"
   "quantization/dequantize_blockwise_bnb4.cuh"
   "quantization/dequantize_blockwise_bnb4.cu"
-  "quantization/dequantize_blockwise_8bits.cu"
-  "quantization/dequantize_blockwise_4bits.cu"
   "quantization/matmul_bnb4.cc"
   "quantization/matmul_bnb4.cuh"
   "quantization/matmul_bnb4.cu"
-  "quantization/matmul_4bits.cu"
-  "quantization/matmul_nbits.cc"  # Removing from exclusion - needed for MatMulNBits kernel
+  # "quantization/matmul_nbits.cc"  # Removing from exclusion - needed for MatMulNBits kernel
   "quantization/moe_quantization.h"
   "quantization/moe_quantization.cc"
   "quantization/quantize_dequantize_linear.cc"

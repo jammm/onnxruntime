@@ -51,11 +51,6 @@ half maybe2half(float x) {
 }
 
 template <>
-hip_bfloat16 maybe2half(float x) {
-  return hip_bfloat16(x);
-}
-
-template <>
 __hip_bfloat16 maybe2half(float x) {
   return __float2bfloat16(x);
 }

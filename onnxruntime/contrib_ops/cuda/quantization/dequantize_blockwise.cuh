@@ -4,6 +4,11 @@
 #pragma once
 #include "core/providers/cuda/shared_inc/cuda_utils.h"
 
+#ifdef __HIPCC__
+#define __uint2bfloat16_rn(x) __hip_bfloat16(x)
+#define __ushort2bfloat16_rn(x) __hip_bfloat16(x)
+#endif
+
 namespace onnxruntime {
 namespace contrib {
 namespace cuda {
