@@ -22,12 +22,14 @@ limitations under the License.
 // Licensed under the MIT License.
 #pragma once
 
-#include <hip/hip_fp16.h>
-#include <hipblas/hipblas.h>
-#include <hipcub/hipcub.hpp>
 #include "core/providers/rocm/rocm_common.h"
 #include "core/providers/rocm/cu_inc/common.cuh"
 #include "core/providers/rocm/shared_inc/rocm_call.h"
+#include <hip/hip_fp16.h>
+#include <hip/hip_bf16.h>
+#include <hipblas/hipblas.h>
+#include <hipcub/hipcub.hpp>
+
 
 using namespace onnxruntime::rocm;
 
@@ -50,6 +52,11 @@ __device__ inline half Rsqrt(const half& x) {
 #else
   return half(rsqrtf(static_cast<float>(x)));
 #endif
+}
+
+template <>
+__device__ inline hip_bfloat16 Rsqrt(const hip_bfloat16& x) {
+  return hip_bfloat16(rsqrtf(static_cast<float>(x)));
 }
 
 __device__ inline half2 AddHalf2(const half2 a, const half2 b) {
@@ -78,18 +85,23 @@ struct KeyValuePairSum {
                                                                   const hipcub::KeyValuePair<half2, half2>& b) {
     return hipcub::KeyValuePair<half2, half2>(AddHalf2(a.key, b.key), AddHalf2(a.value, b.value));
   }
+
+  __device__ inline hipcub::KeyValuePair<hip_bfloat16, hip_bfloat16> operator()(const hipcub::KeyValuePair<hip_bfloat16, hip_bfloat16>& a,
+                                                                                 const hipcub::KeyValuePair<hip_bfloat16, hip_bfloat16>& b) {
+    return hipcub::KeyValuePair<hip_bfloat16, hip_bfloat16>(a.key + b.key, a.value + b.value);
+  }
 };
 
-template <typename U, typename V, int TPB>
+template <typename T, int TPB>
 __device__ inline void LayerNorm(
-    const hipcub::KeyValuePair<U, U>& thread_data, const int ld, const int offset, const V* beta,
-    const V* gamma, const U epsilon, V* output) {
+    const hipcub::KeyValuePair<T, T>& thread_data, const int ld, const int offset, const T* beta,
+    const T* gamma, const T epsilon, T* output) {
   // Assuming thread_data is already divided by ld
 
-  using BlockReduce = hipcub::BlockReduce<hipcub::KeyValuePair<U, U>, TPB>;
+  using BlockReduce = hipcub::BlockReduce<hipcub::KeyValuePair<T, T>, TPB>;
   __shared__ typename BlockReduce::TempStorage temp_storage;
-  __shared__ U mu;      // mean
-  __shared__ U rsigma;  // 1 / std.dev.
+  __shared__ T mu;      // mean
+  __shared__ T rsigma;  // 1 / std.dev.
 
   KeyValuePairSum pair_sum;
   const auto sum_kv = BlockReduce(temp_storage).Reduce(thread_data, pair_sum);
@@ -102,23 +114,23 @@ __device__ inline void LayerNorm(
 
   for (int i = threadIdx.x; i < ld; i += TPB) {
     const int idx = offset + i;
-    const U val = static_cast<U>(output[idx]);
-    const U g = static_cast<U>(gamma[i]);
-    const U b = (nullptr == beta) ? U(0.f) : static_cast<U>(beta[i]);
-    output[idx] = static_cast<V>(g * (val - mu) * rsigma + b);
+    const T val = output[idx];
+    const T g(gamma[i]);
+    const T b = (nullptr == beta) ? (T)0 : beta[i];
+    output[idx] = g * (val - mu) * rsigma + b;
   }
 }
 
-template <typename U, typename V, int TPB>
+template <typename T, int TPB>
 __device__ inline void SimplifiedLayerNorm(
-    const U& thread_data, const int ld, const int offset, const V* gamma, const U epsilon, V* output) {
+    const T& thread_data, const int ld, const int offset, const T* gamma, const T epsilon, T* output) {
   // Assuming thread_data is already divided by ld
 
-  using BlockReduce = hipcub::BlockReduce<U, TPB>;
+  using BlockReduce = hipcub::BlockReduce<T, TPB>;
   __shared__ typename BlockReduce::TempStorage temp_storage;
-  __shared__ U rsigma;  // 1 / std.dev.
+  __shared__ T rsigma;  // 1 / std.dev.
 
-  const U sum = BlockReduce(temp_storage).Sum(thread_data);
+  const T sum = BlockReduce(temp_storage).Sum(thread_data);
 
   if (threadIdx.x == 0) {
     rsigma = Rsqrt(sum + epsilon);
@@ -127,56 +139,39 @@ __device__ inline void SimplifiedLayerNorm(
 
   for (int i = threadIdx.x; i < ld; i += TPB) {
     const int idx = offset + i;
-    const U val = static_cast<U>(output[idx]);
-    const U g = static_cast<U>(gamma[i]);
-    output[idx] = static_cast<V>(g * val * rsigma);
+    const T val = output[idx];
+    const T g(gamma[i]);
+    output[idx] = g * val * rsigma;
   }
 }
 
-template <typename U, typename V, int TPB, int ILP>
-__device__ inline void SimplifiedLayerNormVec(
-    const U& thread_data, const int ld, const int offset, const V* gamma, const U epsilon, V* output) {
+template <typename T, int TPB, int ILP>
+__device__ inline void LayerNormSmall(const T* input_v, const hipcub::KeyValuePair<T, T>& thread_data,
+                                      const int ld, const int idx, const T* beta, const T* gamma,
+                                      const T epsilon, T* output) {
   // Assuming thread_data is already divided by ld
-  using VecV = aligned_vector<V, ILP>;
-  using BlockReduce = hipcub::BlockReduce<U, TPB>;
+  // Small settings: the block covers the leading dimension TPB >= ld. The input
+  // value is available in a register
+  using VecT = aligned_vector<T, ILP>;
+  using BlockReduce = hipcub::BlockReduce<hipcub::KeyValuePair<T, T>, TPB>;
   __shared__ typename BlockReduce::TempStorage temp_storage;
-  __shared__ U rsigma;  // 1 / std.dev.
+  __shared__ T mu;      // mean
+  __shared__ T rsigma;  // 1 / std.dev.
+  T beta_v[ILP], gamma_v[ILP], output_v[ILP];
 
-  const U sum = BlockReduce(temp_storage).Sum(thread_data);
-
-  if (threadIdx.x == 0) {
-    rsigma = Rsqrt(sum + epsilon);
-  }
-  __syncthreads();
-
-  if (ILP * threadIdx.x < ld) {
-    for (int i = threadIdx.x * ILP; i < ld; i += TPB * ILP) {
-      int idx = offset + i;
-      const VecV gamma_v = *reinterpret_cast<const VecV*>(gamma + i);
-      VecV output_v = *reinterpret_cast<const VecV*>(output + idx);
-
-#pragma unroll
-      for (int k = 0; k < ILP; k++) {
-        output_v.val[k] = U(gamma_v.val[k]) * U(output_v.val[k]) * rsigma;
-      }
-      *(reinterpret_cast<VecV*>(output + idx)) = output_v;
+  const bool is_valid = ILP * threadIdx.x < ld;
+  if (is_valid) {
+    if (beta != nullptr) {
+      VecT* beta_val = reinterpret_cast<VecT*>(&beta_v);
+      *beta_val = *reinterpret_cast<const VecT*>(&beta[threadIdx.x * ILP]);
     }
-  }
-}
 
-template <typename U, typename V, int TPB, int ILP>
-__device__ inline void LayerNormVec(
-    const hipcub::KeyValuePair<U, U>& thread_data, const int ld, const int offset, const V* beta,
-    const V* gamma, const U epsilon, V* output) {
-  // Assuming thread_data is already divided by ld
-  using VecV = aligned_vector<V, ILP>;
-  using BlockReduce = hipcub::BlockReduce<hipcub::KeyValuePair<U, U>, TPB>;
-  __shared__ typename BlockReduce::TempStorage temp_storage;
-  __shared__ U mu;      // mean
-  __shared__ U rsigma;  // 1 / std.dev.
+    VecT* gamma_val = reinterpret_cast<VecT*>(&gamma_v);
+    *gamma_val = *reinterpret_cast<const VecT*>(&gamma[threadIdx.x * ILP]);
+  }
 
   KeyValuePairSum pair_sum;
-  const auto sum_kv = BlockReduce(temp_storage).Reduce(thread_data, pair_sum);
+  const hipcub::KeyValuePair<T, T> sum_kv = BlockReduce(temp_storage).Reduce(thread_data, pair_sum);
 
   if (threadIdx.x == 0) {
     mu = sum_kv.key;
@@ -184,84 +179,54 @@ __device__ inline void LayerNormVec(
   }
   __syncthreads();
 
-  if (ILP * threadIdx.x < ld) {
-    for (int i = threadIdx.x * ILP; i < ld; i += TPB * ILP) {
-      int idx = offset + i;
-      const VecV beta_v = (beta != nullptr) ? *reinterpret_cast<const VecV*>(beta + i) : VecV();
-      const VecV gamma_v = *reinterpret_cast<const VecV*>(gamma + i);
-      VecV output_v = *reinterpret_cast<const VecV*>(output + idx);
-
-#pragma unroll
-      for (int k = 0; k < ILP; k++) {
-        output_v.val[k] = (beta != nullptr) ? U(gamma_v.val[k]) * (U(output_v.val[k]) - mu) * rsigma + U(beta_v.val[k]) : U(gamma_v.val[k]) * (U(output_v.val[k]) - mu) * rsigma;
-      }
-      *(reinterpret_cast<VecV*>(output + idx)) = output_v;
-    }
-  }
-}
-
-template <typename T, typename U, typename V, int TPB, int ILP>
-__device__ inline void LayerNormSmall(const T* input_v, const hipcub::KeyValuePair<U, U>& thread_data,
-                                      const int ld, const int idx, const V* beta, const V* gamma,
-                                      const U epsilon, V* output) {
-  // Assuming thread_data is already divided by ld
-  // Small settings: the block covers the leading dimension TPB >= ld. The input
-  // value is available in a register
-  using VecV = aligned_vector<V, ILP>;
-  using BlockReduce = hipcub::BlockReduce<hipcub::KeyValuePair<U, U>, TPB>;
-  __shared__ typename BlockReduce::TempStorage temp_storage;
-  __shared__ U mu;      // mean
-  __shared__ U rsigma;  // 1 / std.dev.
-
-  KeyValuePairSum pair_sum;
-  const hipcub::KeyValuePair<U, U> sum_kv = BlockReduce(temp_storage).Reduce(thread_data, pair_sum);
-
-  if (threadIdx.x == 0) {
-    mu = sum_kv.key;
-    rsigma = Rsqrt(sum_kv.value - mu * mu + epsilon);
-  }
-  __syncthreads();
-
-  if (ILP * threadIdx.x < ld) {
-    const VecV beta_v = (beta != nullptr) ? *reinterpret_cast<const VecV*>(beta + threadIdx.x * ILP) : VecV();
-    const VecV gamma_v = *reinterpret_cast<const VecV*>(gamma + threadIdx.x * ILP);
-    VecV output_v;
-
+  if (is_valid) {
 #pragma unroll
     for (int i = 0; i < ILP; i++) {
-      output_v.val[i] = (beta != nullptr) ? U(gamma_v.val[i]) * (U(input_v[i]) - mu) * rsigma + U(beta_v.val[i]) : U(gamma_v.val[i]) * (U(input_v[i]) - mu) * rsigma;
+      output_v[i] = (beta != nullptr)
+                        ? gamma_v[i] * (input_v[i] - mu) * rsigma + beta_v[i]
+                        : gamma_v[i] * (input_v[i] - mu) * rsigma;
     }
-    *(reinterpret_cast<VecV*>(output + idx)) = output_v;
+
+    VecT* output_val = reinterpret_cast<VecT*>(&output_v);
+    *(reinterpret_cast<VecT*>(&output[idx])) = *output_val;
   }
 }
 
-template <typename T, typename U, typename V, int TPB, int ILP>
-__device__ inline void SimplifiedLayerNormSmall(const T* input_v, const U& thread_data, const int ld, const int idx,
-                                                const V* gamma, const U epsilon, V* output) {
+template <typename T, int TPB, int ILP>
+__device__ inline void SimplifiedLayerNormSmall(const T* input_v, const T& thread_data, const int ld, const int idx,
+                                                const T* gamma, const T epsilon, T* output) {
   // Assuming thread_data is already divided by ld
   // Small settings: the block covers the leading dimension TPB >= ld. The input
   // value is available in a register
-  using VecV = aligned_vector<V, ILP>;
-  using BlockReduce = hipcub::BlockReduce<U, TPB>;
+  using VecT = aligned_vector<T, ILP>;
+  using BlockReduce = hipcub::BlockReduce<T, TPB>;
   __shared__ typename BlockReduce::TempStorage temp_storage;
-  __shared__ U rsigma;  // 1 / std.dev.
+  __shared__ T rsigma;  // 1 / std.dev.
 
-  const U sum = BlockReduce(temp_storage).Sum(thread_data);
+  const bool is_valid = ILP * threadIdx.x < ld;
+
+  T gamma_v[ILP], output_v[ILP];
+
+  if (is_valid) {
+    VecT* gamma_val = reinterpret_cast<VecT*>(&gamma_v);
+    *gamma_val = *reinterpret_cast<const VecT*>(&gamma[threadIdx.x * ILP]);
+  }
+
+  const T sum = BlockReduce(temp_storage).Sum(thread_data);
 
   if (threadIdx.x == 0) {
     rsigma = Rsqrt(sum + epsilon);
   }
   __syncthreads();
 
-  if (ILP * threadIdx.x < ld) {
-    const VecV gamma_v = *reinterpret_cast<const VecV*>(gamma + threadIdx.x * ILP);
-    VecV output_v;
-
+  if (is_valid) {
 #pragma unroll
     for (int i = 0; i < ILP; i++) {
-      output_v.val[i] = U(gamma_v.val[i]) * U(input_v[i]) * rsigma;
+      output_v[i] = gamma_v[i] * input_v[i] * rsigma;
     }
-    *(reinterpret_cast<VecV*>(output + idx)) = output_v;
+
+    VecT* output_val = reinterpret_cast<VecT*>(&output_v);
+    *(reinterpret_cast<VecT*>(&output[idx])) = *output_val;
   }
 }
 

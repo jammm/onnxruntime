@@ -2,29 +2,26 @@
 // Licensed under the MIT License.
 
 #pragma once
-
 #include "core/common/common.h"
-#include "core/providers/rocm/tunable/rocm_tunable.h"
 
 namespace onnxruntime {
 namespace contrib {
 namespace rocm {
 
-template <typename T, typename U, typename V, bool Simplified>
-Status LaunchSkipLayerNormKernel(
-    RocmTuningContext* tuning,
-    Stream* stream,
-    V* output,                      // output tensor
-    T* skip_input_bias_add_output,  // optional output tensor
-    const T* input,                 // input tensor
-    const T* skip,                  // skip tensor
-    const V* gamma,                 // Layer normalization gamma tensor
-    const V* beta,                  // Layer normalization beta tensor
-    const T* bias,                  // Layer normalization beta tensor
-    float epsilon,                  // Layer normalization epsilon
-    int hidden_size,                // hidden size, it is the leading dimension (ld)
-    int element_count               // number of elements in input tensor
-);
+template <typename T, bool Simplified>
+void LaunchSkipLayerNormKernel(
+    hipStream_t stream,
+    T* output,        // normalized output tensor
+    T* sum_output,    // sum of the input and skip (and bias if it exists) tensors output
+    const T* input,   // input tensor
+    const T* skip,    // skip tensor
+    const T* bias,    // bias tensor
+    const T* gamma,   // Layer normalization gamma tensor
+    const T* beta,    // Layer normalization beta tensor
+    float epsilon,    // Layer normalization epsilon
+    int hidden_size,  // hidden size, it is the leading dimension (ld)
+    int row_count,    // number of rows. That is total number of elements divided by hidden size.
+    int skip_size);   // number of elements of the skip tensor
 
 }  // namespace rocm
 }  // namespace contrib

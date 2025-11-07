@@ -33,6 +33,7 @@ namespace rocm {
 
 REGISTER_KERNEL_TYPED(float)
 REGISTER_KERNEL_TYPED(MLFloat16)
+REGISTER_KERNEL_TYPED(BFloat16)
 
 using namespace ONNX_NAMESPACE;
 
@@ -110,21 +111,26 @@ Status SkipLayerNorm<T, Simplified>::ComputeInternal(OpKernelContext* ctx) const
   }
 
   int64_t element_count = input->Shape().Size();
+  int row_count = static_cast<int>(element_count / hidden_size);
+  int skip_size = static_cast<int>(skip->Shape().Size());
+
   typedef typename ToHipType<T>::MappedType HipT;
 
-  return LaunchSkipLayerNormKernel<HipT, float, HipT, Simplified>(
-      GetTuningContext(),
-      ctx->GetComputeStream(),
+  LaunchSkipLayerNormKernel<HipT, Simplified>(
+      Stream(ctx),
       reinterpret_cast<HipT*>(output->MutableData<T>()),
       skip_input_bias_add_output != nullptr ? reinterpret_cast<HipT*>(skip_input_bias_add_output->MutableData<T>()) : nullptr,
       reinterpret_cast<const HipT*>(input->Data<T>()),
       reinterpret_cast<const HipT*>(skip->Data<T>()),
+      (bias != nullptr) ? reinterpret_cast<const HipT*>(bias->Data<T>()) : nullptr,
       reinterpret_cast<const HipT*>(gamma->Data<T>()),
       (beta != nullptr) ? reinterpret_cast<const HipT*>(beta->Data<T>()) : nullptr,
-      (bias != nullptr) ? reinterpret_cast<const HipT*>(bias->Data<T>()) : nullptr,
       epsilon_,
       hidden_size,
-      static_cast<int>(element_count));
+      row_count,
+      skip_size);
+
+  return Status::OK();
 }
 
 }  // namespace rocm
