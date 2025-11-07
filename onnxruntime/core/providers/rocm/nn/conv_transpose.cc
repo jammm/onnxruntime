@@ -19,7 +19,7 @@ namespace rocm {
                                 ConvTranspose<T, NHWC>);
 
 REGISTER_KERNEL_TYPED(float, kOnnxDomain, false)
-REGISTER_KERNEL_TYPED(double, kOnnxDomain, false)
+// REGISTER_KERNEL_TYPED(double, kOnnxDomain, false)  // not supported by MIOpen
 REGISTER_KERNEL_TYPED(MLFloat16, kOnnxDomain, false)
 REGISTER_KERNEL_TYPED(BFloat16, kOnnxDomain, false)
 
@@ -247,6 +247,12 @@ Status ConvTranspose<T, NHWC>::DoConvTranspose(OpKernelContext* context, bool dy
 
   return Status::OK();
 }
+
+// template instantiation
+template class ConvTranspose<float, false>;
+// template class ConvTranspose<double, false>;  // not supported by MIOpen
+template class ConvTranspose<MLFloat16, false>;
+template class ConvTranspose<BFloat16, false>;
 
 #ifdef ENABLE_ROCM_NHWC_OPS
 // template instantiation for NhwcConvTranspose

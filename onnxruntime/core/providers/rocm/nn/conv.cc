@@ -79,7 +79,7 @@ Status MiopenConvolutionDescriptor::Set(size_t rank,
       Conv<T, NHWC>);
 
 REGISTER_KERNEL_TYPED(float, kOnnxDomain, false)
-REGISTER_KERNEL_TYPED(double, kOnnxDomain, false)
+// REGISTER_KERNEL_TYPED(double, kOnnxDomain, false)  // not supported by MIOpen
 REGISTER_KERNEL_TYPED(MLFloat16, kOnnxDomain, false)
 REGISTER_KERNEL_TYPED(BFloat16, kOnnxDomain, false)
 
@@ -469,6 +469,12 @@ Status Conv<T, NHWC>::ComputeInternal(OpKernelContext* context) const {
   return Status::OK();
 }
 
+
+// template instantiation
+template class Conv<float, false>;
+// template class Conv<double, false>;  // not supported by MIOpen
+template class Conv<MLFloat16, false>;
+template class Conv<BFloat16, false>;
 
 #ifndef DISABLE_CONTRIB_OPS
 // template instantiation for NhwcConv
