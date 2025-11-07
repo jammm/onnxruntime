@@ -55,8 +55,8 @@ __device__ inline half Rsqrt(const half& x) {
 }
 
 template <>
-__device__ inline hip_bfloat16 Rsqrt(const hip_bfloat16& x) {
-  return hip_bfloat16(rsqrtf(static_cast<float>(x)));
+__device__ inline __hip_bfloat16 Rsqrt(const __hip_bfloat16& x) {
+  return __float2bfloat16(rsqrtf(static_cast<float>(x)));
 }
 
 __device__ inline half2 AddHalf2(const half2 a, const half2 b) {
@@ -65,6 +65,10 @@ __device__ inline half2 AddHalf2(const half2 a, const half2 b) {
 #else
   return __halves2half2(__hadd(a.x, b.x), __hadd(a.y, b.y));
 #endif
+}
+
+__device__ inline __hip_bfloat162 AddBFloat162(const __hip_bfloat162 a, const __hip_bfloat162 b) {
+  return __hadd2(a, b);
 }
 
 struct KeyValuePairSum {
@@ -86,9 +90,12 @@ struct KeyValuePairSum {
     return hipcub::KeyValuePair<half2, half2>(AddHalf2(a.key, b.key), AddHalf2(a.value, b.value));
   }
 
-  __device__ inline hipcub::KeyValuePair<hip_bfloat16, hip_bfloat16> operator()(const hipcub::KeyValuePair<hip_bfloat16, hip_bfloat16>& a,
-                                                                                 const hipcub::KeyValuePair<hip_bfloat16, hip_bfloat16>& b) {
-    return hipcub::KeyValuePair<hip_bfloat16, hip_bfloat16>(a.key + b.key, a.value + b.value);
+  __device__ inline hipcub::KeyValuePair<__hip_bfloat16, __hip_bfloat16> operator()(const hipcub::KeyValuePair<__hip_bfloat16, __hip_bfloat16>& a,
+                                                                                 const hipcub::KeyValuePair<__hip_bfloat16, __hip_bfloat16>& b) {
+    const __hip_bfloat162 a2 = __halves2bfloat162(a.key, a.value);
+    const __hip_bfloat162 b2 = __halves2bfloat162(b.key, b.value);
+    const __hip_bfloat162 res = AddBFloat162(a2, b2);
+    return hipcub::KeyValuePair<__hip_bfloat16, __hip_bfloat16>(__low2bfloat16(res), __high2bfloat16(res));
   }
 };
 

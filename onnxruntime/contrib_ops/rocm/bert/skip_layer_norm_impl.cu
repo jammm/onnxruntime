@@ -55,6 +55,11 @@ hip_bfloat16 maybe2half(float x) {
   return hip_bfloat16(x);
 }
 
+template <>
+__hip_bfloat16 maybe2half(float x) {
+  return __float2bfloat16(x);
+}
+
 // Using only power of 2 numbers will lead to waste of compute for same size such as 768, which is a very common case
 // in BERT. Ideally we can step by wrap_size * num_unroll, but listing too many steps will cause long compile time.
 constexpr int kSizes[] = {128, 320, 384, 640, 768, 1024, 1280, 2048, 4096, 5120, 8192};
@@ -269,8 +274,8 @@ SKIPLAYERNORM_IMPL(float, true);
 SKIPLAYERNORM_IMPL(float, false);
 SKIPLAYERNORM_IMPL(half, true);
 SKIPLAYERNORM_IMPL(half, false);
-SKIPLAYERNORM_IMPL(hip_bfloat16, true);
-SKIPLAYERNORM_IMPL(hip_bfloat16, false);
+SKIPLAYERNORM_IMPL(__hip_bfloat16, true);
+SKIPLAYERNORM_IMPL(__hip_bfloat16, false);
 }  // namespace rocm
 }  // namespace contrib
 }  // namespace onnxruntime

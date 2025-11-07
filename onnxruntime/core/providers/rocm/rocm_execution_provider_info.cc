@@ -27,6 +27,13 @@ constexpr const char* kEnableHipGraph = "enable_hip_graph";
 constexpr const char* kTunableOpEnable = "tunable_op_enable";
 constexpr const char* kTunableOpTuningEnable = "tunable_op_tuning_enable";
 constexpr const char* kTunableOpMaxTuningDurationMs = "tunable_op_max_tuning_duration_ms";
+constexpr const char* kMiopenConv1dPadToNc1d = "miopen_conv1d_pad_to_nc1d";
+constexpr const char* kEnableSkipLayerNormStrictMode = "enable_skip_layer_norm_strict_mode";
+constexpr const char* kPreferNHWCMode = "prefer_nhwc";
+constexpr const char* kUseEPLevelUnifiedStream = "use_ep_level_unified_stream";
+constexpr const char* kUseTF32 = "use_tf32";
+constexpr const char* kFuseConvBias = "fuse_conv_bias";
+constexpr const char* kSdpaKernel = "sdpa_kernel";
 }  // namespace provider_option_names
 }  // namespace rocm
 
@@ -116,6 +123,13 @@ ROCMExecutionProviderInfo ROCMExecutionProviderInfo::FromProviderOptions(const P
                 ORT_RETURN_IF_ERROR(ParseStringWithClassicLocale(value_str, info.tunable_op.max_tuning_duration_ms));
                 return Status::OK();
               })
+          .AddAssignmentToReference(rocm::provider_option_names::kMiopenConv1dPadToNc1d, info.miopen_conv1d_pad_to_nc1d)
+          .AddAssignmentToReference(rocm::provider_option_names::kEnableSkipLayerNormStrictMode, info.enable_skip_layer_norm_strict_mode)
+          .AddAssignmentToReference(rocm::provider_option_names::kPreferNHWCMode, info.prefer_nhwc)
+          .AddAssignmentToReference(rocm::provider_option_names::kUseEPLevelUnifiedStream, info.use_ep_level_unified_stream)
+          .AddAssignmentToReference(rocm::provider_option_names::kUseTF32, info.use_tf32)
+          .AddAssignmentToReference(rocm::provider_option_names::kFuseConvBias, info.fuse_conv_bias)
+          .AddAssignmentToReference(rocm::provider_option_names::kSdpaKernel, info.sdpa_kernel)
           .Parse(options));
 
   ROCMExecutionProviderExternalAllocatorInfo alloc_info{alloc, free, empty_cache};
@@ -145,6 +159,13 @@ ProviderOptions ROCMExecutionProviderInfo::ToProviderOptions(const ROCMExecution
       {rocm::provider_option_names::kTunableOpEnable, MakeStringWithClassicLocale(info.tunable_op.enable)},
       {rocm::provider_option_names::kTunableOpTuningEnable, MakeStringWithClassicLocale(info.tunable_op.tuning_enable)},
       {rocm::provider_option_names::kTunableOpMaxTuningDurationMs, MakeStringWithClassicLocale(info.tunable_op.max_tuning_duration_ms)},
+      {rocm::provider_option_names::kMiopenConv1dPadToNc1d, MakeStringWithClassicLocale(info.miopen_conv1d_pad_to_nc1d)},
+      {rocm::provider_option_names::kEnableSkipLayerNormStrictMode, MakeStringWithClassicLocale(info.enable_skip_layer_norm_strict_mode)},
+      {rocm::provider_option_names::kPreferNHWCMode, MakeStringWithClassicLocale(info.prefer_nhwc)},
+      {rocm::provider_option_names::kUseEPLevelUnifiedStream, MakeStringWithClassicLocale(info.use_ep_level_unified_stream)},
+      {rocm::provider_option_names::kUseTF32, MakeStringWithClassicLocale(info.use_tf32)},
+      {rocm::provider_option_names::kFuseConvBias, MakeStringWithClassicLocale(info.fuse_conv_bias)},
+      {rocm::provider_option_names::kSdpaKernel, MakeStringWithClassicLocale(info.sdpa_kernel)},
   };
 
   return options;

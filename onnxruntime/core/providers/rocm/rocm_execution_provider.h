@@ -70,6 +70,11 @@ class ROCMExecutionProvider : public IExecutionProvider {
   int GetMiopenConvExhaustiveSearch() const { return info_.miopen_conv_exhaustive_search; }
   bool DoCopyOnDefaultStream() const { return info_.do_copy_in_default_stream; }
   bool GetMiopenConvUseMaxWorkspace() const { return info_.miopen_conv_use_max_workspace; }
+  bool GetMiopenConv1dPadToNc1d() const { return info_.miopen_conv1d_pad_to_nc1d; }
+  bool IsSkipLayerNormInStrictMode() const { return info_.enable_skip_layer_norm_strict_mode; }
+  bool IsNHWCPreferred() const { return info_.prefer_nhwc; }
+  bool IsFuseConvBias() const { return info_.fuse_conv_bias; }
+  bool UseTF32() const { return info_.use_tf32; }
 
   ProviderOptions GetProviderOptions() const override {
     return ROCMExecutionProviderInfo::ToProviderOptions(info_);
