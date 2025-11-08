@@ -408,7 +408,7 @@ TEST(PoolBF16Test, AveragePool) {
 
   test.AddInput<BFloat16>("X", x_dims, x_vals);
   test.AddOutput<BFloat16>("Y", expected_dims, expected_vals);
-  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider});
+  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kRocmExecutionProvider});
 #endif
 }
 

@@ -1467,7 +1467,7 @@ TEST(PoolTest, LpPool) {
 
   test.AddInput<float>("X", x_dims, x_vals);
   test.AddOutput<float>("Y", expected_dims, expected_vals);
-  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kCudaNHWCExecutionProvider});
+  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kCudaNHWCExecutionProvider, kRocmExecutionProvider});
 }
 
 // test data generated with lp_pool_test_generator.py
@@ -1532,7 +1532,7 @@ TEST(PoolTest, LpPool2d) {
       test.AddAttribute("kernel_shape", kernel_sizes[kernel_size_count]);
 
       test.AddOutput<float>("Y", y_sizes[y_count], ys[y_count]);
-      test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kCudaNHWCExecutionProvider});
+      test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kCudaNHWCExecutionProvider, kRocmExecutionProvider});
       y_count++;
     }
 }
@@ -1806,7 +1806,7 @@ TEST(PoolTest, GlobalLpPool) {
 
   test.AddInput<float>("X", x_dims, x_vals);
   test.AddOutput<float>("Y", expected_dims, expected_vals);
-  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kCudaNHWCExecutionProvider});
+  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kCudaNHWCExecutionProvider, kRocmExecutionProvider});
 }
 
 TEST(PoolTest, MaxPoolDimWithZeroForN) {

@@ -1086,7 +1086,7 @@ TEST(ResizeOpTest, ResizeOpNearestDownSample5dTest_tf_crop_and_resize_with_extra
 
   test.AddOutput<float>("Y", {1, N, C, static_cast<int64_t>(H * scales[3]), static_cast<int64_t>(W * scales[4])}, Y);
   // Current cuda provider do not support more than 4d
-  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider});
+  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kRocmExecutionProvider});
 }
 
 TEST(ResizeOpTest, ResizeOpNearestUpSampleTest) {
@@ -1168,7 +1168,7 @@ TEST(ResizeOpTest, ResizeOpNearestUpSample5dTest_WithSizes_CeilMode) {
 
   test.AddOutput<float>("Y", {1, N, C, sizes[3], sizes[4]}, Y);
   // Current cuda provider do not support more than 4d
-  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider});
+  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kCudaExecutionProvider, kRocmExecutionProvider});
 }
 
 TEST(ResizeOpTest, ResizeOpNearestUpSample_Floor_Align_Corners) {
@@ -2191,7 +2191,7 @@ TEST(ResizeOpTest, Antialias_Bilinear_dtype) {
     std::vector<int8_t> Y = {1, 3, 4,
                              6, 8, 9,
                              11, 13, 14};
-    InlinedVector<std::string_view> excluded_eps = {kCudaExecutionProvider};
+    InlinedVector<std::string_view> excluded_eps = {kCudaExecutionProvider, kRocmExecutionProvider};
     TestAntialiasing({{"mode", "linear"}, {"exclude_outside", "1"}}, {1, 1, 4, 4}, X, {1, 1, 3, 3}, Y, excluded_eps);
   }
   {
@@ -2300,7 +2300,7 @@ TEST(ResizeOpTest, Antialias_Trilinear_Scale_Is_11s_and_1s1) {
                  << " is slightly different and doesn't match in all cases.";
   }
 
-  InlinedVector<std::string_view> excluded_eps = {kCudaExecutionProvider};
+  InlinedVector<std::string_view> excluded_eps = {kCudaExecutionProvider, kRocmExecutionProvider};
   std::vector<float> X(16 * 4 * 4);
   std::iota(X.begin(), X.end(), 0.f);
   {
@@ -2576,7 +2576,7 @@ TEST(ResizeOpTest, Antialias_Bicubic_Dtype) {
     std::vector<int8_t> X(36);
     std::iota(X.begin(), X.end(), int8_t(0));
     std::vector<int8_t> Y = {4, 6, 7, 16, 18, 19, 28, 30, 31};
-    InlinedVector<std::string_view> excluded_eps = {kCudaExecutionProvider};
+    InlinedVector<std::string_view> excluded_eps = {kCudaExecutionProvider, kRocmExecutionProvider};
     TestAntialiasing({{"mode", "cubic"}, {"cubic_coeff_a", "-0.5f"}, {"exclude_outside", "1"}}, {1, 1, 6, 6},
                      X, {1, 1, 3, 3}, Y, excluded_eps);
   }
