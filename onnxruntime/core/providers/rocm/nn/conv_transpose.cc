@@ -3,77 +3,34 @@
 
 #include "conv_transpose.h"
 #include "core/providers/rocm/rocm_execution_provider.h"
-#include "core/providers/rocm/tensor/transpose.h"
 
 namespace onnxruntime {
 namespace rocm {
 
 // Op Set 11 for ConvTranspose only update document to clearify default dilations and strides value.
 // which are already covered by op set 11 cpu version, so simply add declaration.
-#define REGISTER_KERNEL_TYPED(T, DOMAIN, NHWC)                                                                       \
-  ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(                                                                           \
-      ConvTranspose, DOMAIN, 1, 10, T, kRocmExecutionProvider,                                                      \
-      (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), ConvTranspose<T, NHWC>);  \
-  ONNX_OPERATOR_TYPED_KERNEL_EX(ConvTranspose, DOMAIN, 11, T, kRocmExecutionProvider,                               \
-                                (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
-                                ConvTranspose<T, NHWC>);
+#define REGISTER_KERNEL_TYPED(T)                                                           \
+  ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(                                                 \
+      ConvTranspose,                                                                       \
+      kOnnxDomain,                                                                         \
+      1, 10,                                                                               \
+      T,                                                                                   \
+      kRocmExecutionProvider,                                                              \
+      (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
+      ConvTranspose<T, false>);                                                            \
+  ONNX_OPERATOR_TYPED_KERNEL_EX(                                                           \
+      ConvTranspose,                                                                       \
+      kOnnxDomain,                                                                         \
+      11,                                                                                  \
+      T,                                                                                   \
+      kRocmExecutionProvider,                                                              \
+      (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
+      ConvTranspose<T, false>);
 
-REGISTER_KERNEL_TYPED(float, kOnnxDomain, false)
-// REGISTER_KERNEL_TYPED(double, kOnnxDomain, false)  // not supported by MIOpen
-REGISTER_KERNEL_TYPED(MLFloat16, kOnnxDomain, false)
-REGISTER_KERNEL_TYPED(BFloat16, kOnnxDomain, false)
-
-#ifdef ENABLE_ROCM_NHWC_OPS
-REGISTER_KERNEL_TYPED(float, kMSInternalNHWCDomain, true)
-REGISTER_KERNEL_TYPED(MLFloat16, kMSInternalNHWCDomain, true)
-#endif
-
-// First input (in this case X) is in case NHWC == true also in NHWC format, the other inputs in NCHW
-template <typename T, bool NHWC>
-Status ConvTranspose<T, NHWC>::PrePack(const Tensor& tensor, int input_idx, AllocatorPtr alloc, bool& is_packed,
-                                       PrePackedWeights* prepacked_weights) {
-  is_packed = false;
-  // only layout of weight input is adjusted via PrePack
-  if constexpr (NHWC) {
-    if (is_nhwc_domain_ && input_idx == 1) {  // InputTensors::IN_W
-      // Transpose from {M, C/group, kH, kW} to {M, kH, kW, C/group}
-      auto orig_shape = tensor.Shape();
-      auto shape_size = orig_shape.GetDims().size();
-
-      InlinedVector<size_t, 5> perm;
-      perm.push_back(0);
-      for (size_t i = 2; i < shape_size; i++) perm.push_back(i);
-      perm.push_back(1);
-      gsl::span<size_t> permutation(perm.data(), shape_size);
-
-      TensorShapeVector nhwc_dims;
-      for (size_t i = 0; i < shape_size; i++) {
-        nhwc_dims.push_back(orig_shape[perm[i]]);
-      }
-
-      W_ = Tensor::Create(tensor.DataType(), TensorShape(nhwc_dims), std::move(alloc));
-
-      auto status = rocm::Transpose::DoTranspose(GetDeviceProp(),
-                                                 DefaultHipStream(),
-                                                 DefaultHipblasHandle(),
-                                                 permutation, tensor, *W_);
-      if (!status.IsOK()) {
-        return status;
-      }
-      HIP_CALL_THROW(hipStreamSynchronize(DefaultHipStream()));
-      is_packed = true;
-    } else {
-      W_already_nhwc = true;
-    }
-  } else {
-    ORT_UNUSED_PARAMETER(tensor);
-    ORT_UNUSED_PARAMETER(input_idx);
-    ORT_UNUSED_PARAMETER(alloc);
-    ORT_UNUSED_PARAMETER(prepacked_weights);
-  }
-
-  return Status::OK();
-}
+REGISTER_KERNEL_TYPED(float)
+// not yet supported in MIOpen
+// REGISTER_KERNEL_TYPED(double)
+REGISTER_KERNEL_TYPED(MLFloat16)
 
 template <typename T, bool NHWC>
 Status ConvTranspose<T, NHWC>::ComputeInternal(OpKernelContext* context) const {
@@ -247,18 +204,6 @@ Status ConvTranspose<T, NHWC>::DoConvTranspose(OpKernelContext* context, bool dy
 
   return Status::OK();
 }
-
-// template instantiation
-template class ConvTranspose<float, false>;
-// template class ConvTranspose<double, false>;  // not supported by MIOpen
-template class ConvTranspose<MLFloat16, false>;
-template class ConvTranspose<BFloat16, false>;
-
-#ifdef ENABLE_ROCM_NHWC_OPS
-// template instantiation for NhwcConvTranspose
-template class ConvTranspose<float, true>;
-template class ConvTranspose<MLFloat16, true>;
-#endif
 
 }  // namespace rocm
 }  // namespace onnxruntime

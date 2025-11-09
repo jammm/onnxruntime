@@ -185,8 +185,7 @@ miopenDataType_t MiopenTensor::GetDataType<half>() {
 
 template <>
 miopenDataType_t MiopenTensor::GetDataType<BFloat16>() {
-  ORT_THROW("miopen doesn't support BFloat16.");
-  return miopenFloat;
+  return miopenBFloat16;
 }
 
 template <>
